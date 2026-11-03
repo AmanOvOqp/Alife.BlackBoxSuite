@@ -587,7 +587,9 @@ public class BlackBoxStorage
                 clipSnapshot = _clipboardStore.ToList();
             }
             string clipJson = JsonSerializer.Serialize(clipSnapshot, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_clipboardDbPath, clipJson, Encoding.UTF8);
+            string clipTmp = _clipboardDbPath + ".tmp";
+            File.WriteAllText(clipTmp, clipJson, Encoding.UTF8);
+            File.Move(clipTmp, _clipboardDbPath, overwrite: true);
         }
         catch { }
     }
@@ -606,10 +608,14 @@ public class BlackBoxStorage
             }
 
             string clipJson = JsonSerializer.Serialize(clipSnapshot, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_clipboardDbPath, clipJson, Encoding.UTF8);
+            string clipTmp = _clipboardDbPath + ".tmp";
+            File.WriteAllText(clipTmp, clipJson, Encoding.UTF8);
+            File.Move(clipTmp, _clipboardDbPath, overwrite: true);
 
             string profileJson = JsonSerializer.Serialize(profileSnapshot, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_dailyProfilesPath, profileJson, Encoding.UTF8);
+            string profTmp = _dailyProfilesPath + ".tmp";
+            File.WriteAllText(profTmp, profileJson, Encoding.UTF8);
+            File.Move(profTmp, _dailyProfilesPath, overwrite: true);
         }
         catch { }
     }

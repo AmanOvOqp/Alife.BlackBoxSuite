@@ -125,9 +125,17 @@ public class BlackBoxConfig
     [Description("离开达到离席阈值后，第一次触碰鼠标或按压键盘瞬间（微秒级边缘触发），立即主动唤醒桌宠睁眼迎接，默认开启")]
     public bool EnableReturnNotifyPrompt { get; set; } = true;
 
-    [DisplayName("1. 归座唤醒提示词模板")]
-    [Description("归座时发送给桌宠的提示词文本模板，默认：阿瞒回到屏幕前了。")]
-    public string ReturnPromptTemplate { get; set; } = "阿瞒回到屏幕前了。";
+    [DisplayName("1. 归座唤醒提示词模板(短暂离开)")]
+    [Description("短暂离开归座时发送给桌宠的提示词模板，支持 {AwayMinutes}、{TimeOfDay}、{ProcessName} 宏置换")]
+    public string ReturnPromptTemplate { get; set; } = "阿瞒短暂离开 {AwayMinutes} 分钟后回到屏幕前了（当前时段：{TimeOfDay}）。";
+
+    [DisplayName("1. 久别归座分界门槛(分钟)")]
+    [Description("离开达到此分钟数及以上时，归座自动切换为「久别重逢」专属提示词模板，默认25分钟")]
+    public int LongReturnThresholdMinutes { get; set; } = 25;
+
+    [DisplayName("1. 久别重逢归座提示词模板")]
+    [Description("离开较长时间（如吃饭、上课、外出）归座时的专属提示词模板，支持 {AwayMinutes}、{TimeOfDay}、{ProcessName} 宏置换")]
+    public string LongReturnPromptTemplate { get; set; } = "阿瞒离开工位 {AwayMinutes} 分钟后终于回来啦（当前时段：{TimeOfDay}，焦点：{ProcessName}），请热情温柔地迎接他归座！";
 
     [DisplayName("2. 防误判真离席通知")]
     [Description("结合声卡发声与全屏防假离线，确认真走开达到门槛时，主动通知桌宠挂起与记录离席，默认开启")]
@@ -160,6 +168,74 @@ public class BlackBoxConfig
     [DisplayName("4. 甩鼠告警提示词模板")]
     [Description("甩鼠告警发送给桌宠的提示词模板，支持 {ProcessName} 与 {WindowTitle} 宏置换")]
     public string RageShakePromptTemplate { get; set; } = "检测到阿瞒在应用 [{ProcessName}] 中频繁高速往复晃动鼠标，疑似遇到难题、报错或思路卡壳，请温柔关切安抚。";
+
+    [DisplayName("5. 指定应用打开/切入提醒开关")]
+    [Description("当打开或切入监控名单中的特定应用时，是否主动通知桌宠，默认开启")]
+    public bool EnableAppOpenNotifyPrompt { get; set; } = true;
+
+    [DisplayName("5. 监控提醒的目标应用名单")]
+    [Description("需要触发提醒的应用进程名或窗口标题关键词（多个用英文逗号分隔，如：SumatraPDF,Yuanshen,StarRail,steam,Code；留空则不触发）")]
+    public string WatchedAppsCsv { get; set; } = "";
+
+    [DisplayName("5. 同应用提醒冷却时间(秒)")]
+    [Description("同一个目标应用触发提醒后的防刷屏冷却时间（防止Alt+Tab来回切屏重复提醒），默认300秒(5分钟)")]
+    public int AppOpenNotifyCooldownSeconds { get; set; } = 300;
+
+    [DisplayName("5. 指定应用打开提示词模板")]
+    [Description("检测到打开/切入目标应用时发送给桌宠的提示词模板，支持 {ProcessName} 与 {WindowTitle} 宏置换")]
+    public string AppOpenPromptTemplate { get; set; } = "检测到阿瞒打开并切入了目标应用 [{ProcessName}]（窗口：{WindowTitle}）。";
+
+    [DisplayName("6. 自定义按键/组合键监测提醒开关")]
+    [Description("检测到按下指定的自定义按键或组合键达到设定次数时，是否主动通知桌宠，默认开启")]
+    public bool EnableKeyWatchNotifyPrompt { get; set; } = true;
+
+    [DisplayName("6. 自定义监测按键/组合键列表")]
+    [Description("支持单键（如 Back,Esc,F5,Delete,Enter,Space,A-Z）或组合键（如 Ctrl+Z,Ctrl+S,Alt+Q,Ctrl+Shift+F），多个用逗号分隔；也支持单独指定某键次数如 Back:20,Ctrl+Z:5")]
+    public string WatchedKeysSpec { get; set; } = "Back:20, Ctrl+Z:8";
+
+    [DisplayName("6. 自定义按键触发次数门槛(次)")]
+    [Description("在统计时间窗内按下目标按键/组合键达到此次数时触发提醒（设为 1 则按一下即提醒；设为 20 则连按20次提醒），默认10次")]
+    public int KeyWatchTriggerCount { get; set; } = 10;
+
+    [DisplayName("6. 自定义按键统计时间窗(秒)")]
+    [Description("统计自定义按键累计按压次数的时间窗口（秒），默认30秒")]
+    public int KeyWatchWindowSeconds { get; set; } = 30;
+
+    [DisplayName("6. 自定义按键提醒冷却(秒)")]
+    [Description("同一自定义按键触发提醒后的防刷屏冷却时间（秒），默认60秒")]
+    public int KeyWatchCooldownSeconds { get; set; } = 60;
+
+    [DisplayName("6. 自定义按键提醒提示词模板")]
+    [Description("触发自定义按键监测时发送给桌宠的提示词模板，支持 {KeyName}、{Count}、{WindowSeconds}、{ProcessName}、{WindowTitle} 宏置换")]
+    public string KeyWatchPromptTemplate { get; set; } = "检测到阿瞒在应用 [{ProcessName}] 中 {WindowSeconds}秒内按下监测按键 [{KeyName}] 达 {Count} 次，请根据当前场景主动关怀或响应。";
+
+    [DisplayName("7. 连续久坐/防疲劳提醒开关")]
+    [Description("当连续在电脑前活跃操作达到设定分钟数（期间未离席休息）时，是否主动通知桌宠提醒休息，默认开启")]
+    public bool EnableContinuousWorkNotifyPrompt { get; set; } = true;
+
+    [DisplayName("7. 连续久坐提醒门槛(分钟)")]
+    [Description("连续活跃未离席达到此分钟数时触发一次防疲劳提醒，默认90分钟")]
+    public int ContinuousWorkThresholdMinutes { get; set; } = 90;
+
+    [DisplayName("7. 连续久坐提醒提示词模板")]
+    [Description("触发连续久坐防疲劳提醒时发送给桌宠的提示词模板，支持 {Minutes}、{ProcessName}、{WindowTitle} 宏置换")]
+    public string ContinuousWorkPromptTemplate { get; set; } = "阿瞒已经连续在电脑前专注操作满 {Minutes} 分钟没有离开工位休息了（当前应用：{ProcessName}），请温柔提醒他喝口水、活动一下颈椎和眼睛。";
+
+    [DisplayName("8. 深夜修仙/熬夜温柔哄睡开关")]
+    [Description("在设定的深夜时段检测到仍在高频打字或活跃操作时，是否触发一次温柔哄睡提醒（每晚最多触发一次，绝不唠叨），默认开启")]
+    public bool EnableLateNightNotifyPrompt { get; set; } = true;
+
+    [DisplayName("8. 深夜哄睡触发时间(HH:mm)")]
+    [Description("深夜开始检测熬夜的时间点（24小时制，如 00:30 或 01:00，有效窗口至凌晨 05:00），默认 01:00")]
+    public string LateNightTriggerTime { get; set; } = "01:00";
+
+    [DisplayName("8. 深夜哄睡提示词模板")]
+    [Description("触发深夜修仙提醒时发送给桌宠的提示词模板，支持 {CurrentTime}、{ProcessName}、{WindowTitle} 宏置换")]
+    public string LateNightPromptTemplate { get; set; } = "现在已经是深夜 {CurrentTime} 了，阿瞒还在应用 [{ProcessName}] 前忙碌，请温柔心疼地哄他早点保存进度去休息，别熬太晚。";
+
+    [DisplayName("全屏沉浸免打扰延后护盾")]
+    [Description("当处于全屏游戏或全屏看视频时，非紧急提醒（如久坐防疲劳、深夜哄睡）自动静默排队，待退出全屏切回桌面瞬间再温柔送达，默认开启")]
+    public bool DeferNotifyWhenFullscreen { get; set; } = true;
 
     [DisplayName("主动通知派发方式")]
     [Description("主动事件派发给角色的方式：Poke(轻量注入系统提示，角色在合适时机自然回应，不强行打断，推荐) 或 Chat(直接触发一轮主动对话)")]

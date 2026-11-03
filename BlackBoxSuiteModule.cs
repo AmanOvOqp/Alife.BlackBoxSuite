@@ -11,7 +11,8 @@ namespace Alife.BlackBoxSuite;
 
 [Module("全息感知黑盒套件",
     "静默记录应用时间线、同屏伴读拓扑、打字节拍、滚轮翻页、鼠标动力学、声卡进程级峰值、SMTC媒体播放、外设监督、剪贴板与截图视觉闪存库、文件脉搏及每日专注画像",
-    defaultCategory: "系统感知"
+    defaultCategory: "系统感知",
+    EditorUI = typeof(BlackBoxSuiteUI)
 )]
 public class BlackBoxSuiteModule(
     XmlFunctionCaller functionCaller,
@@ -32,7 +33,7 @@ public class BlackBoxSuiteModule(
         _storage.Load();
         _engine = BlackBoxEngine.Acquire(Configuration);
 
-        BlackBoxEngine.OnActiveNotification += OnActiveNotify;
+        BlackBoxEngine.OnActiveNotificationTyped += OnActiveNotifyTyped;
         BlackBoxEngine.OnGlobalDeviceNotification += OnDeviceNotify;
 
         XmlHandler xmlHandler = new(this)
@@ -53,6 +54,21 @@ public class BlackBoxSuiteModule(
     {
         RegisterSystemPrompt();
         return Task.CompletedTask;
+    }
+
+    public void SyncConfigToEngine()
+    {
+        try
+        {
+            var eng = _engine ?? BlackBoxEngine.Instance;
+            if (eng != null && Configuration != null)
+            {
+                eng.UpdateConfig(Configuration);
+                eng.RefreshWatchersIfNeeded();
+            }
+            RegisterSystemPrompt();
+        }
+        catch { }
     }
 
         private void RegisterSystemPrompt()
@@ -85,11 +101,36 @@ public class BlackBoxSuiteModule(
     }
 
 
-    private void OnActiveNotify(string prompt, string mode)
+    private void OnActiveNotifyTyped(string prompt, string mode, BlackBoxNotificationType type)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(prompt)) return;
+
+            // 角色本地独立门禁检查：核对当前角色配置是否开启了对应提醒
+            var cfg = Configuration;
+            if (cfg == null) return;
+
+            bool isAllowed = type switch
+            {
+                BlackBoxNotificationType.RageShake => cfg.EnableRageShakeNotifyPrompt,
+                BlackBoxNotificationType.Return => cfg.EnableReturnNotifyPrompt,
+                BlackBoxNotificationType.Idle => cfg.EnableIdleNotifyPrompt,
+                BlackBoxNotificationType.AudioEndpoint => cfg.EnableAudioEndpointNotifyPrompt,
+                BlackBoxNotificationType.Device => cfg.DeviceNotifyPrompt,
+                BlackBoxNotificationType.AppOpen => cfg.EnableAppOpenNotifyPrompt,
+                BlackBoxNotificationType.KeyWatch => cfg.EnableKeyWatchNotifyPrompt,
+                BlackBoxNotificationType.ContinuousWork => cfg.EnableContinuousWorkNotifyPrompt,
+                BlackBoxNotificationType.LateNight => cfg.EnableLateNightNotifyPrompt,
+                _ => true // 测试或通用通知放行
+            };
+
+            if (!isAllowed)
+            {
+                // 当前角色未开启此类提醒，静默拦截丢弃，杜绝跨角色打扰
+                return;
+            }
+
             if (mode.Equals("Chat", StringComparison.OrdinalIgnoreCase))
             {
                 interactor.Chat(prompt);
@@ -109,6 +150,8 @@ public class BlackBoxSuiteModule(
     {
         try
         {
+            // 设备全局通知遵循当前角色 DeviceNotifyPrompt 开关
+            if (Configuration != null && !Configuration.DeviceNotifyPrompt) return;
             interactor.Poke(prompt);
         }
         catch { }
@@ -361,6 +404,25 @@ public class BlackBoxSuiteModule(
         [Description("耳机连接提示词模板({DeviceName})")] string? headphonePluggedPrompt = null,
         [Description("扬声器外放提示词模板({DeviceName})")] string? headphoneUnpluggedPrompt = null,
         [Description("甩鼠告警提示词模板({ProcessName}/{WindowTitle})")] string? rageShakePrompt = null,
+        [Description("是否启用指定应用打开/切入提醒开关")] bool? enableAppOpenNotify = null,
+        [Description("监控提醒的目标应用名单(逗号分隔进程名或标题关键词)")] string? watchedAppsCsv = null,
+        [Description("同应用提醒冷却时间(秒)")] int? appOpenCooldownSeconds = null,
+        [Description("指定应用打开提示词模板({ProcessName}/{WindowTitle})")] string? appOpenPrompt = null,
+        [Description("是否启用自定义按键/组合键监测提醒开关")] bool? enableKeyWatchNotify = null,
+        [Description("自定义监测按键/组合键列表(如 Back:20,Ctrl+Z:5,F5,Alt+Q)")] string? watchedKeysSpec = null,
+        [Description("自定义按键默认触发次数门槛(次)")] int? keyWatchTriggerCount = null,
+        [Description("自定义按键统计时间窗(秒)")] int? keyWatchWindowSeconds = null,
+        [Description("自定义按键提醒冷却(秒)")] int? keyWatchCooldownSeconds = null,
+        [Description("自定义按键提醒提示词模板({KeyName}/{Count}/{WindowSeconds}/{ProcessName}/{WindowTitle})")] string? keyWatchPrompt = null,
+        [Description("是否启用连续久坐/防疲劳提醒开关")] bool? enableContinuousWorkNotify = null,
+        [Description("连续久坐提醒门槛(分钟)")] int? continuousWorkMinutes = null,
+        [Description("连续久坐提醒提示词模板({Minutes}/{ProcessName}/{WindowTitle})")] string? continuousWorkPrompt = null,
+        [Description("久别归座分界门槛(分钟)")] int? longReturnMinutes = null,
+        [Description("久别重逢归座提示词模板({AwayMinutes}/{TimeOfDay}/{ProcessName})")] string? longReturnPrompt = null,
+        [Description("是否启用深夜修仙/熬夜温柔哄睡开关")] bool? enableLateNightNotify = null,
+        [Description("深夜哄睡触发时间(如 01:00)")] string? lateNightTime = null,
+        [Description("深夜哄睡提示词模板({CurrentTime}/{ProcessName}/{WindowTitle})")] string? lateNightPrompt = null,
+        [Description("全屏沉浸免打扰延后护盾")] bool? deferWhenFullscreen = null,
         [Description("主动通知派发方式(Poke/Chat)")] string? notifyDispatchMode = null,
         [Description("是否启用剪贴板长期记忆")] bool? enableClipboard = null,
         [Description("剪贴板最小字数门槛")] int? clipboardMinLen = null,
@@ -392,6 +454,28 @@ public class BlackBoxSuiteModule(
 
         if (enableMouseKinematics.HasValue) Configuration.EnableMouseKinematicsWatch = enableMouseKinematics.Value;
         if (rageShakeThreshold.HasValue) Configuration.RageShakeReversalThreshold = Math.Max(3, rageShakeThreshold.Value);
+        if (enableAppOpenNotify.HasValue) Configuration.EnableAppOpenNotifyPrompt = enableAppOpenNotify.Value;
+        if (watchedAppsCsv != null) Configuration.WatchedAppsCsv = watchedAppsCsv;
+        if (appOpenCooldownSeconds.HasValue) Configuration.AppOpenNotifyCooldownSeconds = Math.Max(0, appOpenCooldownSeconds.Value);
+        if (!string.IsNullOrWhiteSpace(appOpenPrompt)) Configuration.AppOpenPromptTemplate = appOpenPrompt;
+
+        if (enableKeyWatchNotify.HasValue) Configuration.EnableKeyWatchNotifyPrompt = enableKeyWatchNotify.Value;
+        if (watchedKeysSpec != null) Configuration.WatchedKeysSpec = watchedKeysSpec;
+        if (keyWatchTriggerCount.HasValue) Configuration.KeyWatchTriggerCount = Math.Max(1, keyWatchTriggerCount.Value);
+        if (keyWatchWindowSeconds.HasValue) Configuration.KeyWatchWindowSeconds = Math.Max(1, keyWatchWindowSeconds.Value);
+        if (keyWatchCooldownSeconds.HasValue) Configuration.KeyWatchCooldownSeconds = Math.Max(1, keyWatchCooldownSeconds.Value);
+        if (!string.IsNullOrWhiteSpace(keyWatchPrompt)) Configuration.KeyWatchPromptTemplate = keyWatchPrompt;
+
+        if (enableContinuousWorkNotify.HasValue) Configuration.EnableContinuousWorkNotifyPrompt = enableContinuousWorkNotify.Value;
+        if (continuousWorkMinutes.HasValue) Configuration.ContinuousWorkThresholdMinutes = Math.Max(5, continuousWorkMinutes.Value);
+        if (!string.IsNullOrWhiteSpace(continuousWorkPrompt)) Configuration.ContinuousWorkPromptTemplate = continuousWorkPrompt;
+
+        if (longReturnMinutes.HasValue) Configuration.LongReturnThresholdMinutes = Math.Max(5, longReturnMinutes.Value);
+        if (!string.IsNullOrWhiteSpace(longReturnPrompt)) Configuration.LongReturnPromptTemplate = longReturnPrompt;
+        if (enableLateNightNotify.HasValue) Configuration.EnableLateNightNotifyPrompt = enableLateNightNotify.Value;
+        if (!string.IsNullOrWhiteSpace(lateNightTime)) Configuration.LateNightTriggerTime = lateNightTime.Trim();
+        if (!string.IsNullOrWhiteSpace(lateNightPrompt)) Configuration.LateNightPromptTemplate = lateNightPrompt;
+        if (deferWhenFullscreen.HasValue) Configuration.DeferNotifyWhenFullscreen = deferWhenFullscreen.Value;
         
 
         if (enableIdle.HasValue) Configuration.EnableIdleWatch = enableIdle.Value;
@@ -459,6 +543,8 @@ public class BlackBoxSuiteModule(
             RegisterSystemPrompt();
         }
 
+        _engine?.UpdateConfig(Configuration);
+
         interactor.Poke(
             $"小黑盒配置已更新生效：窗口={Configuration.EnableWindowTimeline}(阈限:{Configuration.WindowDwellThresholdSeconds}s, 伴读:{Configuration.EnableCoReadingWatch}/{Configuration.CoReadingUnoccludedRatio:P0}), " +
             $"键盘={Configuration.EnableKeyboardWatch}, 滚轮={Configuration.EnableMouseWheelWatch}, 鼠标动力学={Configuration.EnableMouseKinematicsWatch}(甩鼠门槛:{Configuration.RageShakeReversalThreshold}次), " +
@@ -472,7 +558,7 @@ public class BlackBoxSuiteModule(
 
     protected override Task OnDestroy()
     {
-        BlackBoxEngine.OnActiveNotification -= OnActiveNotify;
+        BlackBoxEngine.OnActiveNotificationTyped -= OnActiveNotifyTyped;
         BlackBoxEngine.OnGlobalDeviceNotification -= OnDeviceNotify;
         BlackBoxEngine.Release();
         _engine = null;
