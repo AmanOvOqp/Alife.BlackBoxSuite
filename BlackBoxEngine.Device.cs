@@ -52,6 +52,8 @@ public partial class BlackBoxEngine
                 DurationSeconds = 0
             }, _config.MaxTransientEventsCount);
 
+            NoteTriggerEvent(gamepadConnected ? TriggerSignal.DeviceAttached : TriggerSignal.DeviceDetached);
+
             if (_config.DeviceNotifyPrompt)
             {
                 DispatchNotification($"【外设变动提醒】{desc}", false, BlackBoxNotificationType.Device);
@@ -85,6 +87,7 @@ public partial class BlackBoxEngine
                     Details = $"物理音频输出端点切换: {oldName} -> {newName} (切为耳机: {newIsHeadphone})",
                     DurationSeconds = 0
                 }, _config.MaxTransientEventsCount);
+                NoteTriggerEvent(TriggerSignal.AudioEndpointChanged);
 
                 if (_config.EnableAudioEndpointNotifyPrompt)
                 {
@@ -129,6 +132,7 @@ public partial class BlackBoxEngine
                         Details = "蓝牙外设连入系统",
                         DurationSeconds = 0
                     }, _config.MaxTransientEventsCount);
+                    NoteTriggerEvent(TriggerSignal.DeviceAttached);
 
                     if (_config.DeviceNotifyPrompt)
                     {
@@ -150,6 +154,7 @@ public partial class BlackBoxEngine
                         Details = "蓝牙外设断开连接",
                         DurationSeconds = 0
                     }, _config.MaxTransientEventsCount);
+                    NoteTriggerEvent(TriggerSignal.DeviceDetached);
 
                     if (_config.DeviceNotifyPrompt)
                     {

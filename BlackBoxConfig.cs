@@ -233,6 +233,18 @@ public class BlackBoxConfig
     [Description("触发深夜修仙提醒时发送给桌宠的提示词模板，支持 {CurrentTime}、{ProcessName}、{WindowTitle} 宏置换")]
     public string LateNightPromptTemplate { get; set; } = "现在已经是深夜 {CurrentTime} 了，阿瞒还在应用 [{ProcessName}] 前忙碌，请温柔心疼地哄他早点保存进度去休息，别熬太晚。";
 
+    [DisplayName("9. 自定义触发规则开关")]
+    [Description("是否允许本角色接收自己创建的自定义触发规则播报。关闭后该角色的自定义规则一律静默，不影响其它角色。默认开启（规则本身由你显式创建，属于明确授权）")]
+    public bool EnableCustomTriggerNotifyPrompt { get; set; } = true;
+
+    [DisplayName("9. 自定义触发同秒合并播报")]
+    [Description("同一秒内多条自定义规则同时命中时，是否合并成一条播报。关闭则只播报优先级最高的一条，其余记入日志。默认关闭")]
+    public bool MergeCustomTriggerPrompts { get; set; } = false;
+
+    [DisplayName("9. 自定义触发全局最小播报间隔(秒)")]
+    [Description("两次自定义规则播报之间的最小间隔，防止连环轰炸。默认 15 秒")]
+    public int CustomTriggerMinIntervalSeconds { get; set; } = 15;
+
     [DisplayName("全屏沉浸免打扰延后护盾")]
     [Description("当处于全屏游戏或全屏看视频时，非紧急提醒（如久坐防疲劳、深夜哄睡）自动静默排队，待退出全屏切回桌面瞬间再温柔送达，默认开启")]
     public bool DeferNotifyWhenFullscreen { get; set; } = true;

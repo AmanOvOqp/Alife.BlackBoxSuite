@@ -14,7 +14,7 @@ namespace Alife.BlackBoxSuite;
     defaultCategory: "系统感知",
     EditorUI = typeof(BlackBoxSuiteUI)
 )]
-public class BlackBoxSuiteModule(
+public partial class BlackBoxSuiteModule(
     XmlFunctionCaller functionCaller,
     ILogger<BlackBoxSuiteModule> logger,
     Interactor<BlackBoxSuiteModule> interactor
@@ -35,6 +35,22 @@ public class BlackBoxSuiteModule(
 
         BlackBoxEngine.OnActiveNotificationTyped += OnActiveNotifyTyped;
         BlackBoxEngine.OnGlobalDeviceNotification += OnDeviceNotify;
+        BlackBoxEngine.OnCustomTriggerDispatch += OnCustomTriggerDispatch;
+
+        // 把本角色的自定义触发规则注册进引擎，按角色独立评估与仲裁
+        try
+        {
+            string roleName = Character?.Name ?? "";
+            if (!string.IsNullOrWhiteSpace(roleName))
+            {
+                _engine.RegisterTriggerRole(
+                    roleName,
+                    () => Configuration?.EnableCustomTriggerNotifyPrompt ?? false,
+                    Configuration?.MergeCustomTriggerPrompts ?? false,
+                    Configuration?.CustomTriggerMinIntervalSeconds ?? 15);
+            }
+        }
+        catch { }
 
         XmlHandler xmlHandler = new(this)
         {
@@ -94,6 +110,7 @@ public class BlackBoxSuiteModule(
 - 【今日/历史专注画像】主人问「今天学了多久/做了什么/专注时长」或深宵总结时，查阅全天活跃总时长、全屏沉浸、伴读拓扑、软件排行与文件产出 → <QueryDailyFocusProfile date="today|yesterday|yyyy-MM-dd"/>；看多日趋势用 <QueryFocusTrend days="7"/>
 - 【行为轨迹复盘】排查过去一段时间的操作流（应用切换、击键、滚轮、声卡、休眠、锁屏、文件保存） → <QueryBlackBoxTimeline minutes="60" category="All|..."/>
 - 【黑盒自适应调优】自主开关或调整黑盒各项监测阈限（驻留时长、离席容差、脱敏、音视频防假离线等） → <ConfigureBlackBox .../>
+- 【自定义触发规则】仅当主人明确要求「盯着我别久坐」「打开某个软件就提醒我」「连续写太久就打断我」这类带体征条件的需求时，才用 <AddTrigger> 建规则，条件写法先查 <ListSignals/>，如 conditions="IdleSeconds>=300;IsFullscreen==0"。查看已有规则用 <ListTriggers/>，删除用 <RemoveTrigger id="..."/>。三条铁律：纯到点闹钟一律走 SystemEventBoost 定时任务，不得用本功能；绝不自作主张替主人建规则，只在主人明确提出时才建；首次创建必须先传 dryRun 预演一次，确认条件与当前状态是否合理，再正式落库
 - 隐式文档：需要查阅函数具体参数结构时，可调用 <blackboxsuitemodule/> 加载详细文档。
 """;
 
@@ -122,6 +139,7 @@ public class BlackBoxSuiteModule(
                 BlackBoxNotificationType.KeyWatch => cfg.EnableKeyWatchNotifyPrompt,
                 BlackBoxNotificationType.ContinuousWork => cfg.EnableContinuousWorkNotifyPrompt,
                 BlackBoxNotificationType.LateNight => cfg.EnableLateNightNotifyPrompt,
+                BlackBoxNotificationType.Custom => cfg.EnableCustomTriggerNotifyPrompt,
                 _ => true // 测试或通用通知放行
             };
 
@@ -143,6 +161,38 @@ public class BlackBoxSuiteModule(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "全息黑盒主动通知桌宠失败");
+        }
+    }
+
+    /// <summary>
+    /// 自定义触发派发接收端。严格按角色名核验，只处理归属于本角色的播报，
+    /// 再核验本角色开关，双重门禁杜绝跨角色串台。
+    /// </summary>
+    private void OnCustomTriggerDispatch(string roleName, string prompt, string mode)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(prompt)) return;
+
+            string myName = Character?.Name ?? "";
+            if (string.IsNullOrWhiteSpace(myName)) return;
+            if (!string.Equals(myName, roleName, StringComparison.OrdinalIgnoreCase)) return;
+
+            var cfg = Configuration;
+            if (cfg == null || !cfg.EnableCustomTriggerNotifyPrompt) return;
+
+            if (!string.IsNullOrWhiteSpace(mode) && mode.Equals("Chat", StringComparison.OrdinalIgnoreCase))
+            {
+                interactor.Chat(prompt);
+            }
+            else
+            {
+                interactor.Poke(prompt);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "全息黑盒自定义触发派发失败");
         }
     }
 
@@ -560,6 +610,15 @@ public class BlackBoxSuiteModule(
     {
         BlackBoxEngine.OnActiveNotificationTyped -= OnActiveNotifyTyped;
         BlackBoxEngine.OnGlobalDeviceNotification -= OnDeviceNotify;
+        BlackBoxEngine.OnCustomTriggerDispatch -= OnCustomTriggerDispatch;
+
+        try
+        {
+            string roleName = Character?.Name ?? "";
+            if (!string.IsNullOrWhiteSpace(roleName)) _engine?.UnregisterTriggerRole(roleName);
+        }
+        catch { }
+
         BlackBoxEngine.Release();
         _engine = null;
         return Task.CompletedTask;

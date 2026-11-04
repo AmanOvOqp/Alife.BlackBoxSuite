@@ -54,6 +54,7 @@ public partial class BlackBoxEngine
                 Details = string.IsNullOrEmpty(sourceCtx) ? item.Summary : $"来源上下文: {sourceCtx}",
                 DurationSeconds = 0
             }, _config.MaxTransientEventsCount);
+            NoteTriggerEvent(TriggerSignal.ClipboardChanged);
         }
     }
 

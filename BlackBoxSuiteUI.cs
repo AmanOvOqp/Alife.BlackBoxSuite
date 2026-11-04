@@ -536,6 +536,9 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
 
             if (_activeTab == "all" || _activeTab == "memory")
                 BuildClipboardFilePromptSection(b);
+
+            if (_activeTab == "all" || _activeTab == "trigger")
+                BuildTriggerSignalSection(b);
         }
 
         b.CloseElement();
@@ -609,6 +612,188 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
         b.CloseElement();
     }
 
+    private void ToggleTriggerPause(string ruleId)
+    {
+        var eng = BlackBoxEngine.Instance;
+        string roleName = Module?.Character?.Name ?? "";
+        if (eng == null || string.IsNullOrWhiteSpace(roleName)) return;
+        var rules = eng.GetRoleRules(roleName);
+        var target = rules.FirstOrDefault(x => x.Id == ruleId);
+        if (target == null) return;
+        target.Paused = !target.Paused;
+        eng.SetRoleRules(roleName, rules);
+        StateHasChanged();
+    }
+
+    private void DeleteTriggerRule(string ruleId)
+    {
+        var eng = BlackBoxEngine.Instance;
+        string roleName = Module?.Character?.Name ?? "";
+        if (eng == null || string.IsNullOrWhiteSpace(roleName)) return;
+        var rules = eng.GetRoleRules(roleName);
+        rules.RemoveAll(x => x.Id == ruleId);
+        eng.SetRoleRules(roleName, rules);
+        StateHasChanged();
+    }
+
+    // ==================== 💠 自定义触发规则与信号面板 ====================
+    private void BuildTriggerSignalSection(RenderTreeBuilder b)
+    {
+        var eng = BlackBoxEngine.Instance;
+        string roleName = Module?.Character?.Name ?? "";
+
+        // ---------- 卡片一：当前角色规则清单 ----------
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card full-width");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card-head");
+        b.AddMarkupContent(Next(), @"<div class=""bb-card-title"">💠 当前角色自定义触发规则</div>");
+        b.CloseElement();
+
+        if (eng == null || string.IsNullOrWhiteSpace(roleName))
+        {
+            b.AddMarkupContent(Next(), @"<div class=""bb-desc"">引擎或角色尚未就绪，规则面板暂不可用。</div>");
+        }
+        else
+        {
+            var rules = eng.GetRoleRules(roleName);
+            if (rules.Count == 0)
+            {
+                b.AddMarkupContent(Next(), @"<div class=""bb-desc"">该角色还没有自定义触发规则。可以让桌宠按需求创建，例如空闲满五分钟且不在全屏时提醒，或连续工作满九十分钟提醒活动。</div>");
+            }
+            else
+            {
+                b.OpenElement(Next(), "div");
+                b.AddAttribute(Next(), "class", "bb-live-grid");
+                foreach (var r in rules)
+                {
+                    string cond = string.Join(" 且 ", r.Conditions.Select(c =>
+                    {
+                        string v = c.TextValue ?? c.Value.ToString("F0");
+                        return c.Signal + BlackBoxSuiteModule.OperatorToSymbol(c.Operator) + v + (c.DurationSeconds > 0 ? " 持续 " + c.DurationSeconds.ToString("F0") + " 秒" : "");
+                    }));
+                    string state = r.Paused ? "已暂停" : (r.Enabled ? "生效中" : "已停用");
+                    string remain = string.Equals(r.Lifecycle, "Count", StringComparison.OrdinalIgnoreCase)
+                        ? " 剩余 " + r.RemainingTimes + "/" + r.MaxTimes
+                        : "";
+                    string daily = r.DailyMaxTimes > 0 ? " | 今日 " + r.TodayFireCount + "/" + r.DailyMaxTimes : "";
+                    string detail = cond + " | 周期 " + r.Lifecycle + remain + daily + " | 冷却 " + r.CooldownSeconds + "秒 | 已触发 " + r.FireCount + "次";
+
+                    b.OpenElement(Next(), "div");
+                    b.AddAttribute(Next(), "class", "bb-live-pill");
+
+                    b.OpenElement(Next(), "span");
+                    b.AddAttribute(Next(), "class", "bb-live-label");
+                    b.AddContent(Next(), "【" + r.Id + "】" + r.Name + " · " + state);
+                    b.CloseElement();
+
+                    b.OpenElement(Next(), "span");
+                    b.AddAttribute(Next(), "class", "bb-live-val");
+                    b.AddAttribute(Next(), "title", detail);
+                    b.AddContent(Next(), detail);
+                    b.CloseElement();
+
+                    string rid = r.Id;
+                    bool paused = r.Paused;
+
+                    b.OpenElement(Next(), "button");
+                    b.AddAttribute(Next(), "class", "bb-btn");
+                    b.AddAttribute(Next(), "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, () => ToggleTriggerPause(rid)));
+                    b.AddContent(Next(), paused ? "▶ 恢复" : "⏸ 暂停");
+                    b.CloseElement();
+
+                    b.OpenElement(Next(), "button");
+                    b.AddAttribute(Next(), "class", "bb-btn");
+                    b.AddAttribute(Next(), "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, () => DeleteTriggerRule(rid)));
+                    b.AddContent(Next(), "🗑 删除");
+                    b.CloseElement();
+
+                    b.CloseElement();
+                }
+                b.CloseElement();
+            }
+        }
+        b.CloseElement();
+
+        // ---------- 卡片二：数值型信号 ----------
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card-head");
+        b.AddMarkupContent(Next(), @"<div class=""bb-card-title"">🔢 数值型信号清单</div>");
+        b.CloseElement();
+        b.AddMarkupContent(Next(), @"<div class=""bb-desc"">写法：信号名 运算符 数字，运算符支持 大于、小于、大于等于、小于等于、等于、不等于。</div>");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-live-grid");
+        BuildLivePill(b, "IdleSeconds", "系统空闲秒数，最常用");
+        BuildLivePill(b, "ForegroundDwellSeconds", "前台窗口已停留秒数");
+        BuildLivePill(b, "IsFullscreen", "是否全屏，1 是 0 否");
+        BuildLivePill(b, "KeystrokesPerMinute", "每分钟击键数");
+        BuildLivePill(b, "BackspacePerMinute", "每分钟退格数");
+        BuildLivePill(b, "WheelPerMinute", "每分钟滚轮格数");
+        BuildLivePill(b, "MousePixelsPerMinute", "每分钟鼠标移动像素");
+        BuildLivePill(b, "ClickBurstCount", "连点次数");
+        BuildLivePill(b, "RageShakeCount", "暴躁甩鼠次数");
+        BuildLivePill(b, "AudioPeak", "音频峰值 0 到 1");
+        BuildLivePill(b, "IsAudioPlaying", "是否在发声，1 是 0 否");
+        BuildLivePill(b, "IsHeadphone", "是否耳机输出，1 是 0 否");
+        BuildLivePill(b, "TodayActiveMinutes", "今日累计活跃分钟");
+        BuildLivePill(b, "TodayFullscreenMinutes", "今日累计全屏分钟");
+        BuildLivePill(b, "ContinuousWorkMinutes", "连续工作分钟数，久坐提醒核心");
+        BuildLivePill(b, "ClipboardLength", "剪贴板文本长度");
+        BuildLivePill(b, "MinuteOfDay", "当天第几分钟 0 到 1439");
+        BuildLivePill(b, "DayOfWeek", "星期几 1 到 7");
+        b.CloseElement();
+        b.CloseElement();
+
+        // ---------- 卡片三：文本型信号 ----------
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card-head");
+        b.AddMarkupContent(Next(), @"<div class=""bb-card-title"">📝 文本型信号清单</div>");
+        b.CloseElement();
+        b.AddMarkupContent(Next(), @"<div class=""bb-desc"">写法：信号名 等于 文本。例如前台是浏览器可写 ForegroundApp 等于 chrome。</div>");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-live-grid");
+        BuildLivePill(b, "ForegroundApp", "前台进程名，如 chrome、Code");
+        BuildLivePill(b, "ForegroundTitle", "前台窗口标题");
+        BuildLivePill(b, "AudioProcess", "发声进程名");
+        BuildLivePill(b, "MediaTitle", "当前播放曲目");
+        BuildLivePill(b, "ClipboardText", "剪贴板文本内容");
+        BuildLivePill(b, "LastFileName", "最近落盘文件名");
+        BuildLivePill(b, "LastFileExt", "最近落盘文件后缀");
+        b.CloseElement();
+        b.CloseElement();
+
+        // ---------- 卡片四：事件型信号 ----------
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card full-width");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card-head");
+        b.AddMarkupContent(Next(), @"<div class=""bb-card-title"">⚡ 事件型信号清单</div>");
+        b.CloseElement();
+        b.AddMarkupContent(Next(), @"<div class=""bb-desc"">事件型条件写法：信号 等于 1，表示只要该事件发生即命中，一次事件只触发一次。已接入：AppOpened、AppClosed、FileDropped。ClipboardChanged、ScreenLocked、ScreenUnlocked、SystemResumed 为预留位，当前不产生事件。</div>");
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-live-grid");
+        BuildLivePill(b, "AppOpened", "某个应用被切到前台");
+        BuildLivePill(b, "AppClosed", "某个应用退出前台");
+        BuildLivePill(b, "FileDropped", "有文件落盘到监控目录");
+        BuildLivePill(b, "ClipboardChanged", "剪贴板内容发生变化");
+        BuildLivePill(b, "ScreenLocked", "屏幕锁定");
+        BuildLivePill(b, "ScreenUnlocked", "屏幕解锁");
+        BuildLivePill(b, "SystemResumed", "系统从休眠唤醒");
+        b.CloseElement();
+        b.CloseElement();
+    }
+
     private void BuildCategoryTabs(RenderTreeBuilder b)
     {
         b.OpenElement(Next(), "div");
@@ -622,6 +807,7 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
         AddTabButton(b, "media", "🎧 声波与次元外设");
         AddTabButton(b, "idle", "🌙 离席与结界守望");
         AddTabButton(b, "memory", "📸 闪存记忆与脉搏");
+        AddTabButton(b, "trigger", "💠 自定义触发规则");
 
         b.CloseElement();
     }

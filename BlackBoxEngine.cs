@@ -26,7 +26,9 @@ public enum BlackBoxNotificationType
     AppOpen,
     KeyWatch,
     ContinuousWork,
-    LateNight
+    LateNight,
+    /// <summary>自定义触发规则专用通道</summary>
+    Custom
 }
 
 public partial class BlackBoxEngine : IDisposable
@@ -398,6 +400,13 @@ public partial class BlackBoxEngine : IDisposable
             {
                 tickCounter++;
 
+                // 自定义触发规则引擎：每秒采集快照并逐角色评估派发
+                try
+                {
+                    if (_roleRules.Count > 0) TickTriggers(DateTime.Now);
+                }
+                catch { }
+
                 if (_config.EnableWindowTimeline)
                 {
                     CheckForegroundWindow();
@@ -621,6 +630,7 @@ public partial class BlackBoxEngine : IDisposable
                     Details = $"休眠前停留在应用: {_lastProcess} ({_lastTitle})",
                     DurationSeconds = 0
                 }, _config.MaxTransientEventsCount);
+                NoteTriggerEvent(TriggerSignal.SystemSuspending);
                 _storage.Save();
             }
             else if (e.Mode == Microsoft.Win32.PowerModes.Resume)
@@ -635,6 +645,7 @@ public partial class BlackBoxEngine : IDisposable
                     Details = $"恢复活跃于应用: {_lastProcess} ({_lastTitle})",
                     DurationSeconds = dur
                 }, _config.MaxTransientEventsCount);
+                NoteTriggerEvent(TriggerSignal.SystemResumed);
 
                 CheckAndTriggerReturnFromIdle("系统唤醒");
             }
@@ -662,6 +673,7 @@ public partial class BlackBoxEngine : IDisposable
                     Details = $"锁屏前停留在应用: {_lastProcess} ({_lastTitle})",
                     DurationSeconds = 0
                 }, _config.MaxTransientEventsCount);
+                NoteTriggerEvent(TriggerSignal.ScreenLocked);
             }
             else if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock)
             {
@@ -675,6 +687,7 @@ public partial class BlackBoxEngine : IDisposable
                     Details = $"恢复于应用: {_lastProcess} ({_lastTitle})",
                     DurationSeconds = dur
                 }, _config.MaxTransientEventsCount);
+                NoteTriggerEvent(TriggerSignal.ScreenUnlocked);
 
                 CheckAndTriggerReturnFromIdle("屏幕解锁");
             }
