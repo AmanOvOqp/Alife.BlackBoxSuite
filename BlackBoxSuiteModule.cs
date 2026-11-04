@@ -146,7 +146,9 @@ public partial class BlackBoxSuiteModule(
 - 播报词 prompt 是条件满足后发给你的内容，支持宏置换，常用有连续工作分钟数、进程名、窗口标题、当前时间、空闲秒数、今日活跃分钟。写它时当成你将来要对用户说的话来写，而不是一句系统日志。
 - dispatchMode 决定用戳一戳还是正式对话，小幅提醒用 Poke，需要对方回应的用 Chat。priority 是同秒多条规则一起命中时的先后，数字大的先播，不要全部设成同一优先级。
 - 每个角色启用中的规则上限三十条，超出会被拒。规则可在面板上暂停或删除。
-- 三个必守：绝不自作主张替用户建规则，只有他明确提出才建；首次创建先传 dryRun 为 true 预演，预演会逐条列出每个信号的实际值与判定结果，确认合理再正式落库；建完要告诉用户你建了什么、大概什么时候会响、怎么删。
+- 可以主动建规则。观察到用户有稳定重复的体征诉求时（比如连续几天久坐超时、常在深夜还敲键盘、总是抱着手柄打同一款游戏），不必等他开口，直接建一条。但要有分寸：同一类需求不重复建第二条；他刚说过别烦我或亲手删掉了某条，就不要立刻再建同类的；建之前用一句话讲清你要建什么，别默不作声地塞给他。
+- 这套行为受「允许 AI 主动自建触发规则」开关控制，默认开启。关掉之后这个角色就不该再主动建，只在他明确开口要求时才建。
+- 首次创建先传 dryRun 为 true 预演，预演会逐条列出每个信号的实际值与判定结果，确认合理再正式落库。建完要告诉他你建了什么、大概什么时候会响、怎么删。
 - 信号取不到值时一律判为不满足，不会被当成零去误触发，所以不要指望在维度关闭时靠规则兜底。
 
 ## 调优与文档
@@ -156,7 +158,12 @@ public partial class BlackBoxSuiteModule(
 - 需要查具体参数结构或函数完整说明时，调用 <blackboxsuitemodule/> 加载详细文档。
 """;
 
-        interactor.Prompt(defaultPrompt.Trim());
+        var promptText = defaultPrompt.Trim();
+        if (Configuration != null && !Configuration.EnableAiSelfCreateRule)
+        {
+            promptText += "\n\n- 当前状态提醒：此角色的「允许 AI 主动自建触发规则」已关闭，你不得主动创建规则，只能等主人明确提出后再建。";
+        }
+        interactor.Prompt(promptText);
     }
 
 
@@ -528,7 +535,8 @@ public partial class BlackBoxSuiteModule(
         [Description("是否启用工作区文件脉搏与下载管家")] bool? enableFilePulse = null,
         [Description("文件脉搏监听目录列表(逗号分隔路径)")] string? watchedDirsCsv = null,
         [Description("内存瞬态队列最大容量(条)")] int? maxTransientEvents = null,
-        [Description("是否向角色上下文注入功能说明")] bool? enablePromptInjection = null
+        [Description("是否向角色上下文注入功能说明")] bool? enablePromptInjection = null,
+        [Description("是否允许 AI 主动自建触发规则，关闭后角色只能在用户明确提出时才建")] bool? enableAiSelfCreateRule = null
     )
     {
         if (enableWindow.HasValue) Configuration.EnableWindowTimeline = enableWindow.Value;
@@ -629,6 +637,7 @@ public partial class BlackBoxSuiteModule(
         }
 
         if (maxTransientEvents.HasValue) Configuration.MaxTransientEventsCount = Math.Max(50, maxTransientEvents.Value);
+        if (enableAiSelfCreateRule.HasValue) Configuration.EnableAiSelfCreateRule = enableAiSelfCreateRule.Value;
         if (enablePromptInjection.HasValue)
         {
             Configuration.EnablePromptInjection = enablePromptInjection.Value;

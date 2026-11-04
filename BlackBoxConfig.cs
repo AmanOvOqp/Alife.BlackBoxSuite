@@ -233,6 +233,10 @@ public class BlackBoxConfig
     [Description("触发深夜修仙提醒时发送给桌宠的提示词模板，支持 {CurrentTime}、{ProcessName}、{WindowTitle} 宏置换")]
     public string LateNightPromptTemplate { get; set; } = "现在已经是深夜 {CurrentTime} 了，阿瞒还在应用 [{ProcessName}] 前忙碌，请温柔心疼地哄他早点保存进度去休息，别熬太晚。";
 
+    [DisplayName("9. 允许 AI 主动自建触发规则")]
+    [Description("开启后允许搭载本模块的角色在你没有明确要求的情况下，主动依据体征条件为你创建自定义触发规则；关闭后角色只能在明确提出时才创建，主动创建一律被拒绝。默认开启")]
+    public bool EnableAiSelfCreateRule { get; set; } = true;
+
     [DisplayName("9. 自定义触发规则开关")]
     [Description("是否允许本角色接收自己创建的自定义触发规则播报。关闭后该角色的自定义规则一律静默，不影响其它角色。默认开启（规则本身由你显式创建，属于明确授权）")]
     public bool EnableCustomTriggerNotifyPrompt { get; set; } = true;
