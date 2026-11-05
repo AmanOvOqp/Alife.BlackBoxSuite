@@ -17,13 +17,15 @@ namespace Alife.BlackBoxSuite;
 public partial class BlackBoxSuiteModule(
     XmlFunctionCaller functionCaller,
     ILogger<BlackBoxSuiteModule> logger,
-    Interactor<BlackBoxSuiteModule> interactor
+    Interactor<BlackBoxSuiteModule> interactor,
+    ConfigurationSystem configurationSystem
 ) :
     ChatBehaviour,
     IConfigurable<BlackBoxConfig>
 {
     public BlackBoxConfig Configuration { get; set; } = null!;
 
+    private readonly ConfigurationSystem _configurationSystem = configurationSystem;
     private BlackBoxStorage? _storage;
     private BlackBoxEngine? _engine;
 
@@ -83,8 +85,26 @@ public partial class BlackBoxSuiteModule(
                 eng.RefreshWatchersIfNeeded();
             }
             RegisterSystemPrompt();
+            SaveConfiguration();
         }
         catch { }
+    }
+
+    // 将当前模块配置持久化落盘，杜绝仅改内存导致重启后配置丢失
+    public void SaveConfiguration()
+    {
+        try
+        {
+            if (Configuration == null) return;
+            _configurationSystem.SetConfiguration(
+                typeof(BlackBoxSuiteModule),
+                Configuration,
+                Character?.StorageKey ?? "");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "全息黑盒配置落盘失败");
+        }
     }
 
         private void RegisterSystemPrompt()
@@ -638,13 +658,10 @@ public partial class BlackBoxSuiteModule(
 
         if (maxTransientEvents.HasValue) Configuration.MaxTransientEventsCount = Math.Max(50, maxTransientEvents.Value);
         if (enableAiSelfCreateRule.HasValue) Configuration.EnableAiSelfCreateRule = enableAiSelfCreateRule.Value;
-        if (enablePromptInjection.HasValue)
-        {
-            Configuration.EnablePromptInjection = enablePromptInjection.Value;
-            RegisterSystemPrompt();
-        }
+        if (enablePromptInjection.HasValue) Configuration.EnablePromptInjection = enablePromptInjection.Value;
 
-        _engine?.UpdateConfig(Configuration);
+        // 统一收口：热同步引擎、刷新监视器、重新注入提示词、落盘持久化
+        SyncConfigToEngine();
 
         interactor.Poke(
             $"小黑盒配置已更新生效：窗口={Configuration.EnableWindowTimeline}(阈限:{Configuration.WindowDwellThresholdSeconds}s, 伴读:{Configuration.EnableCoReadingWatch}/{Configuration.CoReadingUnoccludedRatio:P0}), " +
