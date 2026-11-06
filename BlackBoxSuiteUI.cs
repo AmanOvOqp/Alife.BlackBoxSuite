@@ -1335,6 +1335,7 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
         BuildNumberRow(b, "内存瞬态事件队列上限(条)", "FIFO 滑动窗口容量", Config.MaxTransientEventsCount, 50, 2000, v => { Config.MaxTransientEventsCount = v; Save(); });
         BuildToggleRow(b, "允许 AI 主动自建触发规则", "开启后角色可在判断合适时主动为你建规则，不必每次等你开口；关闭则只能在明确要求时创建", Config.EnableAiSelfCreateRule, v => { Config.EnableAiSelfCreateRule = v; Save(); });
         BuildToggleRow(b, "向角色注入黑盒能力说明", "开启后自动向角色系统提示词注入黑盒函数指南", Config.EnablePromptInjection, v => { Config.EnablePromptInjection = v; Save(); });
+        BuildTextRow(b, "提示词注入档位(精简/完整/关闭)", "默认精简：只注入功能概述、调用时机与函数清单，角色需要细节时自行加载完整文档，占用上下文最少；完整：注入全部能力速查与使用准则；关闭：等同总开关关闭。自定义模板非空时以模板为准", Config.PromptInjectionStyle, v => { Config.PromptInjectionStyle = v; Save(); });
 
         b.CloseElement();
     }

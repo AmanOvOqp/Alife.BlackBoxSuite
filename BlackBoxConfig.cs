@@ -315,12 +315,16 @@ public class BlackBoxConfig
     #endregion
 
     #region 12. 角色提示词与上下文心智注入
-    [DisplayName("是否向角色上下文注入功能说明")]
-    [Description("开启后自动向搭载本模块的角色系统提示中注入全息黑盒的完整能力速查与多源仲裁使用指南，默认开启")]
+    [DisplayName("12. 是否向角色上下文注入功能说明")]
+    [Description("总开关。关闭后本模块不再向角色注入任何提示词说明，功能仍可被显式调用，但角色不会知道它存在。默认开启")]
     public bool EnablePromptInjection { get; set; } = true;
 
     [DisplayName("自定义黑盒提示词模板(留空使用默认)")]
     [Description("若填写则使用自定义提示词替换默认功能说明注入；留空则使用官方全功能标准指引")]
     public string CustomPrompt { get; set; } = "";
+
+    [DisplayName("12. 提示词注入档位")]
+    [Description("精简=只注入功能概述、调用时机与函数要点，角色需要细节时自行输出模块标签加载完整文档，占用上下文最少，推荐；完整=注入全部能力速查与使用准则，字多但一次说全；关闭=等同于总开关关闭。自定义模板非空时一律以自定义模板为准。默认精简")]
+    public string PromptInjectionStyle { get; set; } = "精简";
     #endregion
 }

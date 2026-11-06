@@ -118,6 +118,36 @@ public partial class BlackBoxSuiteModule(
             return;
         }
 
+        string style = (Configuration?.PromptInjectionStyle ?? "精简").Trim();
+        if (style == "关闭" || style.Equals("Off", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        bool fullInjection = style.Contains("完整") || style.Equals("Full", StringComparison.OrdinalIgnoreCase);
+
+        if (!fullInjection)
+        {
+            string briefPrompt = """
+你已装备「全息感知黑盒」（BlackBoxSuiteModule）。它在系统底层绝对静默地记账，记录用户真实的工作状态：前台应用与驻留、打字节拍与纠错、滚轮翻页、鼠标动力学、声卡发声与媒体、音频端点与外设、剪贴板与截图、工作区文件落盘、每日专注与全屏沉浸。它不弹窗、不打扰、不主动开口，只在你需要时把事实交到你手里。
+
+什么时候该调：需要知道用户此刻在干什么、是否专注、是否已离开工位；用户提到「我刚才复制的那个」「刚才看到的那段代码」；用户问今天学了多久、做了什么、最近状态如何；需要还原「刚才那段时间到底发生了什么」；用户提出带体征条件的提醒需求。
+
+不该调的时候：不要为了显得勤快每轮都调。这些接口取的是快照，反复调用既浪费上下文又打断对话节奏。看到他打游戏、刷视频、发呆，都不构成你开口的理由。
+
+可用函数：<QueryCurrentActivity/> 当前实时体征一次取全；<QueryClipboardHistory/> 与 <GetClipboardDetail/> 剪贴板与截图知识库；<QueryDailyFocusProfile/> 与 <QueryFocusTrend/> 每日专注画像与趋势；<QueryBlackBoxTimeline/> 近期离散事件时间线；<ListSignals/> 与 <AddTrigger/> 与 <ListTriggers/> 与 <RemoveTrigger/> 体征条件触发规则；<ConfigureBlackBox/> 调优开关与阈值。
+
+三条底线：查不到就说查不到，绝不凭印象补答案，你的转述必须是事实；剪贴板可能含密码密钥与私人对话，查到不得复述、不得写进任何会被他人看到的地方、不得当闲聊素材；不得擅自替用户改监测开关与阈值，关掉一个维度等于让黑盒失明一片，动完必须说明改了哪几项，测试性改动用完必须还原。
+
+需要完整参数结构、信号清单或使用准则时，输出 <blackboxsuitemodule/> 加载完整文档。
+""";
+            var briefText = briefPrompt.Trim();
+            if (Configuration != null && !Configuration.EnableAiSelfCreateRule)
+            {
+                briefText += "\n\n- 当前状态提醒：此角色的「允许 AI 主动自建触发规则」已关闭，你不得主动创建规则，只能等主人明确提出后再建。";
+            }
+            interactor.Prompt(briefText);
+            return;
+        }
+
         string defaultPrompt = """
 你已装备「全息感知黑盒」（BlackBoxSuiteModule）。它在系统底层绝对静默地记账，记录用户真实的工作状态：前台应用与驻留、打字节拍与纠错、滚轮翻页强度、鼠标动力学、声卡发声与媒体、音频端点与外设、剪贴板与截图、工作区文件落盘、每日专注与全屏沉浸。它不弹窗、不打扰、不主动开口，只在你需要时把事实交到你手里。
 
