@@ -28,11 +28,11 @@ public sealed class BlackBoxCameraMonitor : IDisposable
     private static string? _modelPathCache;
     private static readonly object _modelLock = new object();
 
-    public bool Available { get { return _available; } }
-    public bool HasFace { get { return _hasFace; } }
-    public int FaceCount { get { return _faceCount; } }
-    public double Yaw { get { return _yaw; } }
-    public double Pitch { get { return _pitch; } }
+    public bool Available => _available;
+    public bool HasFace => _hasFace;
+    public int FaceCount => _faceCount;
+    public double Yaw { get { lock (_syncRoot) return _yaw; } }
+    public double Pitch { get { lock (_syncRoot) return _pitch; } }
 
     public double AbsentSeconds()
     {
@@ -100,16 +100,17 @@ public sealed class BlackBoxCameraMonitor : IDisposable
         var t = _thread;
         if (t != null)
         {
-            bool exited = false;
-            try { exited = t.Join(5000); } catch { }
-            if (!exited) return;
+            try { t.Join(2500); } catch { }
         }
         _thread = null;
         _available = false;
         _hasFace = false;
         _faceCount = 0;
-        _yaw = 0;
-        _pitch = 0;
+        lock (_syncRoot)
+        {
+            _yaw = 0;
+            _pitch = 0;
+        }
     }
 
     public void Dispose()
@@ -163,15 +164,10 @@ public sealed class BlackBoxCameraMonitor : IDisposable
             var candidates = new System.Collections.Generic.List<string>();
             try
             {
-                string baseDir = AppContext.BaseDirectory;
-                string dir = baseDir;
-                for (int i = 0; i < 6 && !string.IsNullOrEmpty(dir); i++)
-                {
-                    candidates.Add(System.IO.Path.Combine(dir, "models", "face_detection_yunet_2023mar.onnx"));
-                    candidates.Add(System.IO.Path.Combine(dir, "Plugins", "Alife.BlackBoxSuite", "models", "face_detection_yunet_2023mar.onnx"));
-                    candidates.Add(System.IO.Path.Combine(dir, "Storage", "Plugins", "Alife.BlackBoxSuite", "models", "face_detection_yunet_2023mar.onnx"));
-                    dir = System.IO.Path.GetDirectoryName(dir) ?? "";
-                }
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                candidates.Add(System.IO.Path.Combine(baseDir, "models", "face_detection_yunet_2023mar.onnx"));
+                candidates.Add(System.IO.Path.Combine(baseDir, "Plugins", "Alife.BlackBoxSuite", "models", "face_detection_yunet_2023mar.onnx"));
+                candidates.Add(System.IO.Path.Combine(baseDir, "Storage", "Plugins", "Alife.BlackBoxSuite", "models", "face_detection_yunet_2023mar.onnx"));
             }
             catch { }
             foreach (var c in candidates)
@@ -187,8 +183,10 @@ public sealed class BlackBoxCameraMonitor : IDisposable
         VideoCapture? cap = null;
         FaceDetectorYN? detector = null;
         string? modelPath = LocateModel();
-        int backoffMs = 1000;
-        // 单帧检测耗时仅约 25ms，OpenCV 默认吃满全部核心做并行，CPU 时间暴涨 4 倍却只换来 2 倍墙钟收益，此处锁死单线程。
+        int backoffMs = 500;
+        int consecutiveReadFails = 0;
+
+        // 单帧检测耗时约 25ms，强制 OpenCV 锁定单线程，彻底根除 16 核并发算力争抢
         try { Cv2.SetNumThreads(1); } catch { }
 
         try
@@ -207,10 +205,16 @@ public sealed class BlackBoxCameraMonitor : IDisposable
 
                     if (detector == null)
                     {
-                        if (modelPath == null) { _available = false; SleepInterruptible(3000); continue; }
+                        if (modelPath == null)
+                        {
+                            _available = false;
+                            SleepInterruptible(2000);
+                            continue;
+                        }
                         detector = FaceDetectorYN.Create(modelPath, "", new Size(640, 480), (float)_scoreThreshold, 0.3f, 5000);
                     }
 
+                    // 【看门狗设备初始化与重连探针】：DirectShow 单例独占保护
                     if (cap == null)
                     {
                         int camCount = QueryCameraCount();
@@ -220,7 +224,7 @@ public sealed class BlackBoxCameraMonitor : IDisposable
                             _hasFace = false;
                             _faceCount = 0;
                             SleepInterruptible(backoffMs);
-                            backoffMs = Math.Min(backoffMs * 2, 30000);
+                            backoffMs = Math.Min(backoffMs + 500, 2500); // 严格封顶在 2.5 秒内，杜绝 30 秒永久假死
                             continue;
                         }
 
@@ -231,40 +235,55 @@ public sealed class BlackBoxCameraMonitor : IDisposable
                         {
                             try { c?.Dispose(); } catch { }
                             c = null;
-                        }
-                        if (!opened || c == null)
-                        {
                             _available = false;
                             _hasFace = false;
                             _faceCount = 0;
                             SleepInterruptible(backoffMs);
-                            backoffMs = Math.Min(backoffMs * 2, 30000);
+                            backoffMs = Math.Min(backoffMs + 500, 2500); // 严格封顶 2.5 秒自愈重试
                             continue;
                         }
+
                         c.Set(VideoCaptureProperties.FrameWidth, 640);
                         c.Set(VideoCaptureProperties.FrameHeight, 480);
                         cap = c;
-                        backoffMs = 1000;
+                        backoffMs = 500;
+                        consecutiveReadFails = 0;
                     }
 
-                    _available = true;
                     using (var frame = new Mat())
                     {
                         if (!cap.Read(frame) || frame.Empty())
                         {
-                            try { cap.Dispose(); } catch { }
-                            cap = null;
-                            _available = false;
-                            _hasFace = false;
-                            _faceCount = 0;
-                            SleepInterruptible(500);
+                            consecutiveReadFails++;
+                            if (consecutiveReadFails >= 3)
+                            {
+                                // 连续 3 次读帧失败，判定为设备被外部独占抢占或物理断连，触发看门狗优雅释放与重置
+                                try { cap.Dispose(); } catch { }
+                                cap = null;
+                                _available = false;
+                                _hasFace = false;
+                                _faceCount = 0;
+                                consecutiveReadFails = 0;
+                                SleepInterruptible(backoffMs);
+                                backoffMs = Math.Min(backoffMs + 500, 2500);
+                            }
+                            else
+                            {
+                                SleepInterruptible(100);
+                            }
                             continue;
                         }
+
+                        // 成功读取有效帧：看门狗状态毫秒级满血自愈复位
+                        consecutiveReadFails = 0;
+                        backoffMs = 500;
+                        _available = true;
 
                         using (var resized = new Mat())
                         using (var faces = new Mat())
                         {
-                            if (frame.Width == 640 && frame.Height == 480) { frame.CopyTo(resized); } else { Cv2.Resize(frame, resized, new Size(640, 480)); }
+                            if (frame.Width == 640 && frame.Height == 480) { frame.CopyTo(resized); }
+                            else { Cv2.Resize(frame, resized, new Size(640, 480)); }
                             detector.Detect(resized, faces);
                             ProcessFaces(faces);
                         }
@@ -277,9 +296,9 @@ public sealed class BlackBoxCameraMonitor : IDisposable
                     _faceCount = 0;
                     try { cap?.Dispose(); } catch { }
                     cap = null;
-                    try { detector?.Dispose(); } catch { }
-                    detector = null;
-                    SleepInterruptible(1000);
+                    consecutiveReadFails = 0;
+                    SleepInterruptible(backoffMs);
+                    backoffMs = Math.Min(backoffMs + 500, 2500);
                 }
 
                 int delay = 1000 / Math.Max(1, _fps);
@@ -319,8 +338,11 @@ public sealed class BlackBoxCameraMonitor : IDisposable
         {
             _faceCount = 0;
             _hasFace = false;
-            _yaw = 0;
-            _pitch = 0;
+            lock (_syncRoot)
+            {
+                _yaw = 0;
+                _pitch = 0;
+            }
             return;
         }
 
@@ -341,8 +363,11 @@ public sealed class BlackBoxCameraMonitor : IDisposable
         if (best < 0 || bestScore < _scoreThreshold)
         {
             _hasFace = false;
-            _yaw = 0;
-            _pitch = 0;
+            lock (_syncRoot)
+            {
+                _yaw = 0;
+                _pitch = 0;
+            }
             return;
         }
 
@@ -361,8 +386,14 @@ public sealed class BlackBoxCameraMonitor : IDisposable
         double cx = (rx + lx) / 2.0;
         double cy = (ry + ly) / 2.0;
 
-        _yaw = Math.Round((nx - cx) / eyeDist, 3);
-        _pitch = Math.Round((ny - cy) / eyeDist, 3);
+        double calculatedYaw = Math.Round((nx - cx) / eyeDist, 3);
+        double calculatedPitch = Math.Round((ny - cy) / eyeDist, 3);
+
+        lock (_syncRoot)
+        {
+            _yaw = calculatedYaw;
+            _pitch = calculatedPitch;
+        }
         _hasFace = true;
         Interlocked.Exchange(ref _lastSeenTicks, DateTime.Now.Ticks);
     }
