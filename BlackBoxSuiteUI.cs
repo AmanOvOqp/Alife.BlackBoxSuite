@@ -537,6 +537,9 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
             if (_activeTab == "all" || _activeTab == "memory")
                 BuildClipboardFilePromptSection(b);
 
+            if (_activeTab == "all" || _activeTab == "camera")
+                BuildCameraSection(b);
+
             if (_activeTab == "all" || _activeTab == "trigger")
                 BuildTriggerSignalSection(b);
         }
@@ -807,6 +810,7 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
         AddTabButton(b, "media", "🎧 声波与次元外设");
         AddTabButton(b, "idle", "🌙 离席与结界守望");
         AddTabButton(b, "memory", "📸 闪存记忆与脉搏");
+        AddTabButton(b, "camera", "📷 摄像头体征感知");
         AddTabButton(b, "trigger", "💠 自定义触发规则");
 
         b.CloseElement();
@@ -1340,6 +1344,48 @@ public class BlackBoxSuiteUI : ModuleUIBase<BlackBoxSuiteModule, BlackBoxConfig>
         b.CloseElement();
     }
 
+    // ==================== 7. 摄像头体征感知与在场守望 ====================
+    private void BuildCameraSection(RenderTreeBuilder b)
+    {
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-card");
+
+        b.AddMarkupContent(Next(), @"<div class=""bb-card-head"">
+            <div class=""bb-card-title"">📷 摄像头体征感知与在场守望</div>
+            <span class=""bb-tag"">Camera &amp; Presence</span>
+        </div>");
+
+        BuildToggleRow(b, "摄像头体征感知", "只算结构化数字：在不在、朝向、俯仰。绝不存帧、不录像、不上传云端", Config.EnableCameraSense, v => { Config.EnableCameraSense = v; Save(); });
+        BuildNumberRow(b, "摄像头设备序号", "默认 0；填错会被源头拦截判不可用，绝不会崩宿主", Config.CameraDeviceIndex, 0, 10, v => { Config.CameraDeviceIndex = v; Save(); });
+        BuildNumberRow(b, "采样帧率 (1~10)", "默认 3，推荐 8；8fps 单核约 28%，帧间隔抖动不到 1 毫秒", Config.CameraFps, 1, 10, v => { Config.CameraFps = v; Save(); });
+        BuildDoubleRow(b, "人脸置信度门槛", "0.1 ~ 0.99，默认 0.60；调高更严，调低更松", Config.CameraFaceScoreThreshold, 0.1, 0.99, v => { Config.CameraFaceScoreThreshold = v; Save(); });
+        BuildDoubleRow(b, "头部朝向判定阈值", "0.01 ~ 1.00，默认 0.15；超出即视为侧头", Config.CameraYawThreshold, 0.01, 1.0, v => { Config.CameraYawThreshold = v; Save(); });
+        BuildNumberRow(b, "离开判定宽限(秒)", "默认 60；连续这么久没见到人才算离开，兜住弯腰捡东西的误判", Config.CameraLeaveGraceSeconds, 0, 600, v => { Config.CameraLeaveGraceSeconds = v; Save(); });
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-subcard-top");
+        b.AddAttribute(Next(), "style", "margin-top:14px;");
+        b.OpenElement(Next(), "span");
+        b.AddAttribute(Next(), "class", "bb-label");
+        b.AddAttribute(Next(), "style", "color:#db2777;");
+        b.AddContent(Next(), "真离席静默与在座久坐");
+        b.CloseElement();
+        b.CloseElement();
+
+        BuildToggleRow(b, "真离席自动静默", "摄像头确认人不在工位时，所有主动提醒一律丢弃，不对着空椅子说话。摄像头关闭或不可用时本项完全不起作用", Config.EnableAwaySilence, v => { Config.EnableAwaySilence = v; Save(); });
+        BuildNumberRow(b, "判定真离席的秒数", "10 ~ 600，默认 60；连续这么久没见到人才开始静默", Config.AwaySilenceSeconds, 10, 600, v => { Config.AwaySilenceSeconds = v; Save(); });
+        BuildNumberRow(b, "回来恢复的秒数", "1 ~ 60，默认 10；重新见到人并持续这么久就立刻解除静默", Config.AwayResumeSeconds, 1, 60, v => { Config.AwayResumeSeconds = v; Save(); });
+        BuildToggleRow(b, "人在不动的久坐提醒", "摄像头确认脸还在画面里、但键鼠连续静止时提醒起身。专门针对看书、看纸稿、手不动的真久坐", Config.EnableSeatedIdleNotify, v => { Config.EnableSeatedIdleNotify = v; Save(); });
+        BuildNumberRow(b, "在座静止提醒分钟数", "5 ~ 180，默认 45；超过这个分钟数才提醒一次，不重复刷屏", Config.SeatedIdleMinutes, 5, 180, v => { Config.SeatedIdleMinutes = v; Save(); });
+        BuildTextRow(b, "在座静止提醒提示词", "留空用默认文案；可用 {Minutes} {ProcessName} {WindowTitle}", Config.SeatedIdlePromptTemplate, v => { Config.SeatedIdlePromptTemplate = v; Save(); });
+
+        b.OpenElement(Next(), "div");
+        b.AddAttribute(Next(), "class", "bb-desc");
+        b.AddContent(Next(), "六个信号可直接写进自定义触发规则：CamPresent 在不在视线内、CamFaceCount 画面里有几张脸、CamYaw 头部左右偏、CamPitch 头部俯仰、CamAbsentSeconds 多久没见到人、CamAvailable 设备可不可用。");
+        b.CloseElement();
+
+        b.CloseElement();
+    }
     // ==================== 通用二次元 UI 控件构建辅助 ====================
     private void BuildToggleRow(RenderTreeBuilder b, string title, string desc, bool value, Action<bool> onChanged)
     {

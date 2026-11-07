@@ -1,6 +1,12 @@
 {
-  "Version": "5.45",
+  "Version": "5.50",
   "Dependencies": {
     "Alife.Function.FunctionCaller": ""
+  },
+  "Environments": {
+    "nuget": {
+      "OpenCvSharp4": "==4.13.0.20260627",
+      "OpenCvSharp4.runtime.win": "==4.13.0.20260627"
+    }
   }
 }

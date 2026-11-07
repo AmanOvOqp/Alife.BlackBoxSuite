@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 
 namespace Alife.BlackBoxSuite;
 
@@ -326,5 +326,55 @@ public class BlackBoxConfig
     [DisplayName("12. 提示词注入档位")]
     [Description("精简=只注入功能概述、调用时机与函数要点，角色需要细节时自行输出模块标签加载完整文档，占用上下文最少，推荐；完整=注入全部能力速查与使用准则，字多但一次说全；关闭=等同于总开关关闭。自定义模板非空时一律以自定义模板为准。默认精简")]
     public string PromptInjectionStyle { get; set; } = "精简";
+    #region 13. 摄像头体征感知（内置，不存帧不录像不上传）
+    [DisplayName("13. 摄像头体征感知")] 
+    [Description("是否启用内置摄像头检测，用于判断是否有人在工位、头朝哪边。仅在内存中计算结构化数值，绝不保存画面、绝不录像、绝不上传云端。默认关闭")]
+    public bool EnableCameraSense { get; set; } = false;
+
+    [DisplayName("摄像头设备序号")]
+    [Description("OpenCV 设备索引，0 通常是内置或第一个外接摄像头，外接摄像头常为 1，默认 0")]
+    public int CameraDeviceIndex { get; set; } = 0;
+
+    [DisplayName("摄像头采样帧率")]
+    [Description("每秒采样并检测的帧数，范围 1 到 10，默认 3。帧率越高越灵敏但更耗电")]
+    public int CameraFps { get; set; } = 3;
+
+    [DisplayName("人脸置信度门槛")]
+    [Description("低于此分数的人脸视为误检，范围 0.1 到 0.99，默认 0.6")]
+    public double CameraFaceScoreThreshold { get; set; } = 0.6;
+
+    [DisplayName("头部朝向判定阈值")]
+    [Description("鼻尖相对两眼中点的偏移量除以眼距得到的比例，超过此值判定为明显偏头，默认 0.15")]
+    public double CameraYawThreshold { get; set; } = 0.15;
+
+    [DisplayName("离开判定宽限(秒)")]
+    [Description("画面中连续未见人超过此秒数才判定为离开，避免揉眼、低头、短暂遮挡造成误判，默认 60 秒")]
+    public int CameraLeaveGraceSeconds { get; set; } = 60;
+
+    [DisplayName("真离席自动静默")]
+    [Description("开启后，摄像头连续看不到人达到下面的秒数，就判定为真离席，期间所有主动提醒一律静默丢弃，避免对着空椅子说话。摄像头不可用或未启用时本项完全不起作用。默认关闭")]
+    public bool EnableAwaySilence { get; set; } = false;
+
+    [DisplayName("判定真离席的秒数")]
+    [Description("画面中连续未见人达到此秒数才判定为真离席并开始静默，范围 10 到 600，默认 60 秒")]
+    public int AwaySilenceSeconds { get; set; } = 60;
+
+    [DisplayName("回来恢复的秒数")]
+    [Description("重新见到人并持续此秒数内，立刻解除静默恢复正常提醒，范围 1 到 60，默认 10 秒")]
+    public int AwayResumeSeconds { get; set; } = 10;
+
+    [DisplayName("人在不动的久坐提醒")]
+    [Description("开启后，摄像头确认人还坐在画面里、但键鼠连续静止达到下面分钟数时，主动提醒起身活动。这是针对看书、看纸稿、手不动的真久坐。默认关闭")]
+    public bool EnableSeatedIdleNotify { get; set; } = false;
+
+    [DisplayName("在座静止提醒分钟数")]
+    [Description("脸还在画面里但键鼠持续静止超过此分钟数就提醒，范围 5 到 180，默认 45 分钟")]
+    public int SeatedIdleMinutes { get; set; } = 45;
+
+    [DisplayName("在座静止提醒提示词")]
+    [Description("可用占位符：{Minutes} 已静止分钟数、{ProcessName} 当前前台进程、{WindowTitle} 当前窗口标题。留空使用默认文案")]
+    public string SeatedIdlePromptTemplate { get; set; } = "";
+    #endregion
+
     #endregion
 }

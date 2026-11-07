@@ -133,7 +133,7 @@ public partial class BlackBoxSuiteModule(
 
 不该调的时候：不要为了显得勤快每轮都调。这些接口取的是快照，反复调用既浪费上下文又打断对话节奏。看到他打游戏、刷视频、发呆，都不构成你开口的理由。
 
-可用函数：<QueryCurrentActivity/> 当前实时体征一次取全；<QueryClipboardHistory/> 与 <GetClipboardDetail/> 剪贴板与截图知识库；<QueryDailyFocusProfile/> 与 <QueryFocusTrend/> 每日专注画像与趋势；<QueryBlackBoxTimeline/> 近期离散事件时间线；<ListSignals/> 与 <AddTrigger/> 与 <ListTriggers/> 与 <RemoveTrigger/> 体征条件触发规则；<ConfigureBlackBox/> 调优开关与阈值。
+可用函数：<QueryCurrentActivity/> 当前实时体征一次取全，可指定板块单取（焦点/输入/空闲/音频/外设/剪贴板）；<QueryClipboardHistory/> 与 <GetClipboardDetail/> 剪贴板与截图知识库；<QueryDailyFocusProfile/> 与 <QueryFocusTrend/> 每日专注画像与趋势；<QueryBlackBoxTimeline/> 近期离散事件时间线；<ListSignals/> 与 <AddTrigger/> 与 <ListTriggers/> 与 <RemoveTrigger/> 体征条件触发规则；<ConfigureBlackBox/> 调优开关与阈值。
 
 三条底线：查不到就说查不到，绝不凭印象补答案，你的转述必须是事实；剪贴板可能含密码密钥与私人对话，查到不得复述、不得写进任何会被他人看到的地方、不得当闲聊素材；不得擅自替用户改监测开关与阈值，关掉一个维度等于让黑盒失明一片，动完必须说明改了哪几项，测试性改动用完必须还原。
 
@@ -165,6 +165,8 @@ public partial class BlackBoxSuiteModule(
 
 <QueryCurrentActivity/> 一次取全：当前前台应用与驻留时长、同屏伴读窗口、当分钟击键与退格、滚轮翻页与滚动强度、鼠标动力学体征、系统空闲摘要、声卡是否发声与发声进程、音频输出端点、正在播放的媒体、已连接蓝牙外设、最近剪贴板、最近截图、最近落盘文件。
 
+需要只取某一块时，用 section 参数单独取，可选 焦点、输入、空闲、音频、外设、剪贴板，逗号分隔多个，默认全部。
+
 适合回答「我现在在干嘛」「我是不是走神了」「刚才那个程序是什么」这类问题。
 
 ## 历史与沉淀
@@ -192,6 +194,7 @@ public partial class BlackBoxSuiteModule(
 - 条件语法：一条写成「信号 运算符 值」，多条用分号串联，全部满足才触发。数值型运算符为 >= <= == != > <。文本型另支持 包含 与 contains。
 - 持续型：条件末尾加 at 30s 表示连续满足三十秒才算数，可再追加 grace 5s 自定义中断宽限，默认三秒。
 - 事件型：写法为 信号名==1，只看本轮是否发生，一次发生只触发一次，首轮只做基线不会误报。十一项事件全部可用：应用打开与关闭、文件落盘、剪贴板变化、屏幕锁定与解锁、系统休眠与唤醒、外设接入与断开、音频端点切换。但这些事件依赖对应监测维度开着才会产生，规则不响先查维度开关。
+- 外部插件可以往信号表里注册额外信号，比如摄像头插件提供「是否检测到人」「头部左右偏转」「头部俯仰」「距离上次见到人的秒数」，用于判断用户是否真的坐在工位前。有没有、叫什么，一律以 ListSignals 的实际输出为准，不要凭记忆写。
 - 生命周期：Once 一次性、Count 限次配 maxTimes、Daily 每天、Permanent 永久。dailyMaxTimes 约束每天最多响几次，跨日自动清零。cooldownSeconds 是两次触发的最小间隔，默认三百秒，别设太小否则会烦人。
 - 播报词 prompt 是条件满足后发给你的内容，支持宏置换，常用有连续工作分钟数、进程名、窗口标题、当前时间、空闲秒数、今日活跃分钟。写它时当成你将来要对用户说的话来写，而不是一句系统日志。
 - dispatchMode 决定用戳一戳还是正式对话，小幅提醒用 Poke，需要对方回应的用 Chat。priority 是同秒多条规则一起命中时的先后，数字大的先播，不要全部设成同一优先级。
@@ -217,6 +220,31 @@ public partial class BlackBoxSuiteModule(
     }
 
 
+    // 真离席静默状态位：true 表示摄像头已确认人不在工位，主动提醒全部丢弃
+    private bool _awaySilenced = false;
+
+    // 真离席判定：带回滞，避免站在门口一闪就解禁、坐下就静音来回抖
+    private bool CheckAwaySilence(BlackBoxConfig cfg)
+    {
+        try
+        {
+            var cam = BlackBoxEngine.Instance?.CameraMonitor;
+            if (cam == null || !cam.Available) return false;
+
+            double absent = cam.AbsentSeconds();
+            int silenceSec = Math.Clamp(cfg.AwaySilenceSeconds, 10, 600);
+            int resumeSec = Math.Clamp(cfg.AwayResumeSeconds, 1, 60);
+
+            if (absent >= silenceSec)
+                _awaySilenced = true;
+            else if (absent <= resumeSec)
+                _awaySilenced = false;
+
+            return _awaySilenced;
+        }
+        catch { return false; }
+    }
+
     private void OnActiveNotifyTyped(string prompt, string mode, BlackBoxNotificationType type)
     {
         try
@@ -237,6 +265,7 @@ public partial class BlackBoxSuiteModule(
                 BlackBoxNotificationType.AppOpen => cfg.EnableAppOpenNotifyPrompt,
                 BlackBoxNotificationType.KeyWatch => cfg.EnableKeyWatchNotifyPrompt,
                 BlackBoxNotificationType.ContinuousWork => cfg.EnableContinuousWorkNotifyPrompt,
+                BlackBoxNotificationType.SeatedIdle => cfg.EnableSeatedIdleNotify,
                 BlackBoxNotificationType.LateNight => cfg.EnableLateNightNotifyPrompt,
                 BlackBoxNotificationType.Custom => cfg.EnableCustomTriggerNotifyPrompt,
                 _ => true // 测试或通用通知放行
@@ -245,6 +274,17 @@ public partial class BlackBoxSuiteModule(
             if (!isAllowed)
             {
                 // 当前角色未开启此类提醒，静默拦截丢弃，杜绝跨角色打扰
+                return;
+            }
+
+            // 真离席静默门禁：摄像头确认人已离开工位时，整单丢弃，不对着空椅子说话
+            if (cfg.EnableAwaySilence && CheckAwaySilence(cfg))
+            {
+                try
+                {
+                    logger.LogInformation("[黑盒] 真离席静默生效，已丢弃一条主动提醒 type=" + type);
+                }
+                catch { }
                 return;
             }
 
@@ -307,8 +347,10 @@ public partial class BlackBoxSuiteModule(
     }
 
     [XmlFunction(FunctionMode.OneShot)]
-    [Description("查阅当前系统当下的实时状态切片：前台软件、同屏伴读窗口、驻留时长、击键密度、滚轮翻页、鼠标动力学体征、声卡状态与发声进程、音频输出端点、蓝牙外设、最近剪贴板/截图及文件脉搏。")]
-    public Task QueryCurrentActivity()
+    [Description("查阅当前系统当下的实时状态切片：前台软件、同屏伴读窗口、驻留时长、击键密度、滚轮翻页、鼠标动力学体征、声卡状态与发声进程、音频输出端点、蓝牙外设、最近剪贴板/截图及文件脉搏。可用 section 参数只取需要的板块，避免返回过长。")]
+    public Task QueryCurrentActivity(
+        [Description("板块选择，默认全部。可选：全部、焦点、输入、空闲、音频、外设、剪贴板；可逗号分隔多个，如 焦点,输入")] string section = "全部"
+    )
     {
         var engine = _engine ?? BlackBoxEngine.Instance;
         if (engine == null)
@@ -317,25 +359,63 @@ public partial class BlackBoxSuiteModule(
             return Task.CompletedTask;
         }
 
-        double dwell = engine.CurrentForegroundDwellSeconds;
-        string dwellStr = dwell < 60 ? $"{dwell:F0}秒" : $"{(dwell / 60):F1}分钟";
+        string sec = (section ?? "").Trim().ToLowerInvariant();
+        bool wantAll = sec.Length == 0 || sec.Contains("全部") || sec.Contains("all");
+
+        bool wantFocus = wantAll || sec.Contains("焦点") || sec.Contains("focus");
+        bool wantInput = wantAll || sec.Contains("输入") || sec.Contains("input");
+        bool wantIdle = wantAll || sec.Contains("空闲") || sec.Contains("idle");
+        bool wantAudio = wantAll || sec.Contains("音频") || sec.Contains("audio");
+        bool wantDevice = wantAll || sec.Contains("外设") || sec.Contains("device");
+        bool wantClip = wantAll || sec.Contains("剪贴板") || sec.Contains("clip");
 
         var sb = new StringBuilder();
         sb.AppendLine("=== 当前系统实时行为切片 ===");
-        sb.AppendLine($"- 当前前台应用: {engine.CurrentForegroundApp}");
-        sb.AppendLine($"- 当前驻留时长: {dwellStr}");
-        sb.AppendLine($"- 同屏伴读窗口: {engine.CurrentCoReadingSummary}");
-        sb.AppendLine($"- 键盘当前分钟敲击: {engine.CurrentMinuteKeystrokes} 次 (退格: {engine.CurrentMinuteBackspaces} 次)");
-        sb.AppendLine($"- 鼠标滚轮当前翻页: {engine.CurrentMinuteWheelClicks} 次 (滚动强度: {engine.CurrentMinuteWheelDelta})");
-        sb.AppendLine($"- 鼠标动力学体征: {engine.CurrentMouseKinematicsSummary}");
-        sb.AppendLine($"- 系统物理空闲状态: {engine.CurrentIdleStatusSummary}");
-        sb.AppendLine($"- 声卡音频状态: {(engine.IsAudioPlaying ? "正在发声" : "静音中")} (主峰值: {engine.CurrentAudioPeak:F2} | 发声进程: {engine.ActiveAudioProcessesSummary})");
-        sb.AppendLine($"- 默认音频输出端点: {(string.IsNullOrEmpty(engine.CurrentAudioDeviceFriendlyName) ? "检测中..." : engine.CurrentAudioDeviceFriendlyName)}");
-        sb.AppendLine($"- 正在播放媒体: {(string.IsNullOrEmpty(engine.CurrentMediaTitle) ? "无媒体标题" : engine.CurrentMediaTitle)}");
-        sb.AppendLine($"- 已连接蓝牙外设: {engine.ConnectedBluetoothDevicesSummary}");
-        sb.AppendLine($"- 最近剪贴板文本: {engine.CurrentLastClipboardSummary}");
-        sb.AppendLine($"- 最近视觉闪存截图: {engine.CurrentLastScreenshotSummary}");
-        sb.AppendLine($"- 最近文件落盘/保存: {engine.CurrentLastFilePulseSummary}");
+
+        if (wantFocus)
+        {
+            double dwell = engine.CurrentForegroundDwellSeconds;
+            string dwellStr = dwell < 60 ? $"{dwell:F0}秒" : $"{(dwell / 60):F1}分钟";
+            sb.AppendLine($"- 当前前台应用: {engine.CurrentForegroundApp}");
+            sb.AppendLine($"- 当前驻留时长: {dwellStr}");
+            sb.AppendLine($"- 同屏伴读窗口: {engine.CurrentCoReadingSummary}");
+        }
+
+        if (wantInput)
+        {
+            sb.AppendLine($"- 键盘当前分钟敲击: {engine.CurrentMinuteKeystrokes} 次 (退格: {engine.CurrentMinuteBackspaces} 次)");
+            sb.AppendLine($"- 鼠标滚轮当前翻页: {engine.CurrentMinuteWheelClicks} 次 (滚动强度: {engine.CurrentMinuteWheelDelta})");
+            sb.AppendLine($"- 鼠标动力学体征: {engine.CurrentMouseKinematicsSummary}");
+        }
+
+        if (wantIdle)
+        {
+            sb.AppendLine($"- 系统物理空闲状态: {engine.CurrentIdleStatusSummary}");
+        }
+
+        if (wantAudio)
+        {
+            sb.AppendLine($"- 声卡音频状态: {(engine.IsAudioPlaying ? "正在发声" : "静音中")} (主峰值: {engine.CurrentAudioPeak:F2} | 发声进程: {engine.ActiveAudioProcessesSummary})");
+            sb.AppendLine($"- 默认音频输出端点: {(string.IsNullOrEmpty(engine.CurrentAudioDeviceFriendlyName) ? "检测中..." : engine.CurrentAudioDeviceFriendlyName)}");
+            sb.AppendLine($"- 正在播放媒体: {(string.IsNullOrEmpty(engine.CurrentMediaTitle) ? "无媒体标题" : engine.CurrentMediaTitle)}");
+        }
+
+        if (wantDevice)
+        {
+            sb.AppendLine($"- 已连接蓝牙外设: {engine.ConnectedBluetoothDevicesSummary}");
+        }
+
+        if (wantClip)
+        {
+            sb.AppendLine($"- 最近剪贴板文本: {engine.CurrentLastClipboardSummary}");
+            sb.AppendLine($"- 最近视觉闪存截图: {engine.CurrentLastScreenshotSummary}");
+            sb.AppendLine($"- 最近文件落盘/保存: {engine.CurrentLastFilePulseSummary}");
+        }
+
+        if (!wantFocus && !wantInput && !wantIdle && !wantAudio && !wantDevice && !wantClip)
+        {
+            sb.AppendLine("- 未匹配到任何板块，可选：全部、焦点、输入、空闲、音频、外设、剪贴板");
+        }
 
         interactor.Poke(sb.ToString().TrimEnd());
         return Task.CompletedTask;
@@ -586,7 +666,19 @@ public partial class BlackBoxSuiteModule(
         [Description("文件脉搏监听目录列表(逗号分隔路径)")] string? watchedDirsCsv = null,
         [Description("内存瞬态队列最大容量(条)")] int? maxTransientEvents = null,
         [Description("是否向角色上下文注入功能说明")] bool? enablePromptInjection = null,
-        [Description("是否允许 AI 主动自建触发规则，关闭后角色只能在用户明确提出时才建")] bool? enableAiSelfCreateRule = null
+        [Description("是否允许 AI 主动自建触发规则，关闭后角色只能在用户明确提出时才建")] bool? enableAiSelfCreateRule = null,
+        [Description("是否启用内置摄像头体征感知（只算结构化数字，不存帧不录像不上传）")] bool? enableCamera = null,
+        [Description("摄像头设备序号(默认0)")] int? cameraDeviceIndex = null,
+        [Description("摄像头采样帧率(1~10，默认3)")] int? cameraFps = null,
+        [Description("人脸置信度门槛(0.1~0.99)")] double? cameraFaceScore = null,
+        [Description("头部朝向判定阈值(默认0.15)")] double? cameraYawThreshold = null,
+        [Description("离开判定宽限(秒，默认60)")] int? cameraLeaveGrace = null,
+        [Description("真离席自动静默：摄像头确认人不在工位时，所有主动提醒一律丢弃")] bool? enableAwaySilence = null,
+        [Description("判定真离席的秒数(10~600，默认60)")] int? awaySilenceSeconds = null,
+        [Description("回来恢复的秒数(1~60，默认10)")] int? awayResumeSeconds = null,
+        [Description("人在不动的久坐提醒：脸还在但键鼠持续静止时提醒")] bool? enableSeatedIdleNotify = null,
+        [Description("在座静止提醒分钟数(5~180，默认45)")] int? seatedIdleMinutes = null,
+        [Description("在座静止提醒提示词模板({Minutes}/{ProcessName}/{WindowTitle})")] string? seatedIdlePrompt = null
     )
     {
         if (enableWindow.HasValue) Configuration.EnableWindowTimeline = enableWindow.Value;
@@ -690,6 +782,19 @@ public partial class BlackBoxSuiteModule(
         if (enableAiSelfCreateRule.HasValue) Configuration.EnableAiSelfCreateRule = enableAiSelfCreateRule.Value;
         if (enablePromptInjection.HasValue) Configuration.EnablePromptInjection = enablePromptInjection.Value;
 
+        if (enableCamera.HasValue) Configuration.EnableCameraSense = enableCamera.Value;
+        if (cameraDeviceIndex.HasValue) Configuration.CameraDeviceIndex = Math.Max(0, cameraDeviceIndex.Value);
+        if (cameraFps.HasValue) Configuration.CameraFps = Math.Clamp(cameraFps.Value, 1, 10);
+        if (cameraFaceScore.HasValue) Configuration.CameraFaceScoreThreshold = Math.Clamp(cameraFaceScore.Value, 0.1, 0.99);
+        if (cameraYawThreshold.HasValue) Configuration.CameraYawThreshold = cameraYawThreshold.Value;
+        if (cameraLeaveGrace.HasValue) Configuration.CameraLeaveGraceSeconds = Math.Max(0, cameraLeaveGrace.Value);
+        if (enableAwaySilence.HasValue) Configuration.EnableAwaySilence = enableAwaySilence.Value;
+        if (awaySilenceSeconds.HasValue) Configuration.AwaySilenceSeconds = Math.Clamp(awaySilenceSeconds.Value, 10, 600);
+        if (awayResumeSeconds.HasValue) Configuration.AwayResumeSeconds = Math.Clamp(awayResumeSeconds.Value, 1, 60);
+        if (enableSeatedIdleNotify.HasValue) Configuration.EnableSeatedIdleNotify = enableSeatedIdleNotify.Value;
+        if (seatedIdleMinutes.HasValue) Configuration.SeatedIdleMinutes = Math.Clamp(seatedIdleMinutes.Value, 5, 180);
+        if (!string.IsNullOrEmpty(seatedIdlePrompt)) Configuration.SeatedIdlePromptTemplate = seatedIdlePrompt;
+
         // 统一收口：热同步引擎、刷新监视器、重新注入提示词、落盘持久化
         SyncConfigToEngine();
 
@@ -699,7 +804,8 @@ public partial class BlackBoxSuiteModule(
             $"空闲={Configuration.EnableIdleWatch}(常规:{Configuration.IdleThresholdSeconds}s, 全屏:{Configuration.FullscreenIdleThresholdSeconds}s), " +
             $"声卡={Configuration.EnableAudioWatch}, 媒体={Configuration.EnableMediaWatch}, " +
             $"剪贴板={Configuration.EnableClipboardWatch}, 截图闪存库={Configuration.EnableScreenshotFlashWatch}(JPEG:{Configuration.ScreenshotJpegQuality}), " +
-            $"文件脉搏={Configuration.EnableFilePulseWatch}(目录:{Configuration.WatchedDirectoriesCsv})。"
+            $"文件脉搏={Configuration.EnableFilePulseWatch}(目录:{Configuration.WatchedDirectoriesCsv}), " +
+            $"摄像头={Configuration.EnableCameraSense}(设备:{Configuration.CameraDeviceIndex}, 帧率:{Configuration.CameraFps}fps)。"
         );
         return Task.CompletedTask;
     }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -27,6 +27,8 @@ public enum BlackBoxNotificationType
     KeyWatch,
     ContinuousWork,
     LateNight,
+    // 在座静止久坐提醒
+    SeatedIdle,
     /// <summary>自定义触发规则专用通道</summary>
     Custom
 }
@@ -163,6 +165,40 @@ public partial class BlackBoxEngine : IDisposable
         {
             _config = config;
         }
+        try { CameraMonitorSync(config); } catch { }
+    }
+
+    /// 按最新配置决定是否起停内置摄像头采集。
+    private void CameraMonitorSync(BlackBoxConfig config)
+    {
+        try
+        {
+            if (config.EnableCameraSense)
+            {
+                if (_camera == null)
+                {
+                    _camera = new BlackBoxCameraMonitor();
+                    _camera.UpdateSettings(config.CameraDeviceIndex, config.CameraFps,
+                        config.CameraFaceScoreThreshold, config.CameraYawThreshold, config.CameraLeaveGraceSeconds);
+                    _camera.Start();
+                }
+                else
+                {
+                    _camera.UpdateSettings(config.CameraDeviceIndex, config.CameraFps,
+                        config.CameraFaceScoreThreshold, config.CameraYawThreshold, config.CameraLeaveGraceSeconds);
+                }
+            }
+            else
+            {
+                if (_camera != null)
+                {
+                    _camera.Stop();
+                    _camera.Dispose();
+                    _camera = null;
+                }
+            }
+        }
+        catch { }
     }
 
     public static void Release()
@@ -189,6 +225,11 @@ public partial class BlackBoxEngine : IDisposable
 
 
     private InputHookPumpNative? _inputHookPump;
+
+    private BlackBoxCameraMonitor? _camera;
+
+    /// 内置摄像头采集器，未启用时为 null。
+    internal BlackBoxCameraMonitor? CameraMonitor => _camera;
 
     // 3. 空闲与离席检测 (GetLastInputInfo 原生探针 + 多源联合仲裁)
     private bool _isIdle = false;
@@ -249,6 +290,7 @@ public partial class BlackBoxEngine : IDisposable
         }
     }
     private DateTime _idleStartTime = DateTime.MinValue;
+    private DateTime _lastSeatedIdleNotifyTime = DateTime.MinValue;
     private DateTime _lastActiveTime = DateTime.Now;
     private DateTime _continuousWorkStartTime = DateTime.Now;
     private DateTime _lastContinuousWorkNotifyTime = DateTime.MinValue;
@@ -333,6 +375,12 @@ public partial class BlackBoxEngine : IDisposable
         {
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+        }
+        catch { }
+
+        try
+        {
+            CameraMonitorSync(_config);
         }
         catch { }
 
@@ -497,6 +545,55 @@ public partial class BlackBoxEngine : IDisposable
         double idleSeconds = GetEffectiveIdleSeconds();
         DateTime now = DateTime.Now;
 
+        // 在座交叉验证：摄像头清楚看到脸时，不把静止误判成离席，改走在座静止计时
+        bool seatedPresent = false;
+        try
+        {
+            if (_config.EnableSeatedIdleNotify)
+            {
+                var camSeat = _camera;
+                if (camSeat != null && camSeat.Available && camSeat.HasFace) seatedPresent = true;
+            }
+        }
+        catch { }
+
+        if (seatedPresent)
+        {
+            int seatThresh = Math.Max(5, _config.SeatedIdleMinutes);
+            double seatedMinutes = idleSeconds / 60.0;
+            if (seatedMinutes >= seatThresh &&
+                (_lastSeatedIdleNotifyTime == DateTime.MinValue ||
+                 (now - _lastSeatedIdleNotifyTime).TotalMinutes >= seatThresh))
+            {
+                _lastSeatedIdleNotifyTime = now;
+                int smins = (int)Math.Round(seatedMinutes);
+
+                _storage.AddTransientEvent(new BlackBoxEvent
+                {
+                    Time = now,
+                    Category = "Idle",
+                    Summary = "在座静止久坐提醒：人在画面中但已连续静止 " + smins + " 分钟",
+                    Details = "停留在应用: " + _lastProcess + " (" + _lastTitle + ")",
+                    DurationSeconds = idleSeconds
+                }, _config.MaxTransientEventsCount);
+
+                string stmpl = string.IsNullOrWhiteSpace(_config.SeatedIdlePromptTemplate)
+                    ? "阿瞒人还坐在镜头里，但已经连续 " + smins + " 分钟没动了（当前应用：{ProcessName}），多半是在看书或看纸稿。轻声提醒他抬头活动一下颈椎和眼睛。"
+                    : _config.SeatedIdlePromptTemplate;
+                string sprompt = stmpl
+                    .Replace("{Minutes}", smins.ToString())
+                    .Replace("{ProcessName}", _lastProcess)
+                    .Replace("{WindowTitle}", _lastTitle);
+
+                DispatchNotification(sprompt, allowDeferInFullscreen: false, BlackBoxNotificationType.SeatedIdle);
+            }
+        }
+        else
+        {
+            _lastSeatedIdleNotifyTime = DateTime.MinValue;
+        }
+
+
         int threshold = _lastIsFullscreen
             ? Math.Max(60, _config.FullscreenIdleThresholdSeconds)
             : Math.Max(30, _config.IdleThresholdSeconds);
@@ -507,7 +604,7 @@ public partial class BlackBoxEngine : IDisposable
         bool isSustainedAudio = (_isAudioPlaying && currentAudioDur >= Math.Max(3, _config.AudioFilterDurationSeconds)) || !string.IsNullOrEmpty(_currentMedia);
         bool isAudioActive = !_isIdle && _config.EnableAudioAntiIdle && isSustainedAudio;
 
-        if (idleSeconds >= threshold)
+        if (idleSeconds >= threshold && !seatedPresent)
         {
             if (isAudioActive)
             {
@@ -571,7 +668,7 @@ public partial class BlackBoxEngine : IDisposable
                 }
             }
 
-            if (!_isIdle && _config.EnableContinuousWorkNotifyPrompt)
+            if (!_isIdle && !seatedPresent && _config.EnableContinuousWorkNotifyPrompt)
             {
                 double continuousMinutes = (now - _continuousWorkStartTime).TotalMinutes;
                 int threshMinutes = Math.Max(5, _config.ContinuousWorkThresholdMinutes);
@@ -711,6 +808,14 @@ public partial class BlackBoxEngine : IDisposable
         _clipboardWatcher = null;
         _filePulseWatcher?.Dispose();
         _filePulseWatcher = null;
+
+        try
+        {
+            _camera?.Stop();
+            _camera?.Dispose();
+            _camera = null;
+        }
+        catch { }
 
         try
         {

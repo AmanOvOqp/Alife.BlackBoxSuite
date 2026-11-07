@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -38,6 +38,12 @@ public enum TriggerSignal
     LastFileExt,
     MinuteOfDay,
     DayOfWeek,
+    CamPresent,
+    CamFaceCount,
+    CamYaw,
+    CamPitch,
+    CamAbsentSeconds,
+    CamAvailable,
 
     // ---- 事件型 ----
     AppOpened,
@@ -606,6 +612,55 @@ public partial class BlackBoxEngine
         }
         catch { snap.MarkUnavailable(TriggerSignal.MediaTitle); }
 
+        // ---- 摄像头体征（内置采集，未启用或不可用时不提供该信号）----
+        try
+        {
+            var cam = _camera;
+            if (cam != null)
+            {
+                if (cam.Available)
+                {
+                    snap.SetNumber(TriggerSignal.CamAvailable, 1);
+                    snap.SetNumber(TriggerSignal.CamPresent, cam.IsPresent() ? 1 : 0);
+                    snap.SetNumber(TriggerSignal.CamFaceCount, cam.FaceCount);
+                    if (cam.HasFace)
+                    {
+                        snap.SetNumber(TriggerSignal.CamYaw, cam.Yaw);
+                        snap.SetNumber(TriggerSignal.CamPitch, cam.Pitch);
+                    }
+                    else
+                    {
+                        snap.MarkUnavailable(TriggerSignal.CamYaw);
+                        snap.MarkUnavailable(TriggerSignal.CamPitch);
+                    }
+                    snap.SetNumber(TriggerSignal.CamAbsentSeconds, Math.Round(cam.AbsentSeconds(), 1));
+                }
+                else
+                {
+                    snap.SetNumber(TriggerSignal.CamAvailable, 0);
+                    snap.MarkUnavailable(TriggerSignal.CamPresent);
+                    snap.MarkUnavailable(TriggerSignal.CamFaceCount);
+                    snap.MarkUnavailable(TriggerSignal.CamYaw);
+                    snap.MarkUnavailable(TriggerSignal.CamPitch);
+                    snap.MarkUnavailable(TriggerSignal.CamAbsentSeconds);
+                }
+            }
+            else
+            {
+                snap.MarkUnavailable(TriggerSignal.CamAvailable);
+                snap.MarkUnavailable(TriggerSignal.CamPresent);
+                snap.MarkUnavailable(TriggerSignal.CamFaceCount);
+                snap.MarkUnavailable(TriggerSignal.CamYaw);
+                snap.MarkUnavailable(TriggerSignal.CamPitch);
+                snap.MarkUnavailable(TriggerSignal.CamAbsentSeconds);
+            }
+        }
+        catch
+        {
+            snap.MarkUnavailable(TriggerSignal.CamPresent);
+            snap.MarkUnavailable(TriggerSignal.CamAvailable);
+        }
+
         // ---- 今日画像 ----
         try
         {
@@ -984,6 +1039,13 @@ public partial class BlackBoxEngine
         out string desc, out bool unavailable)
     {
         unavailable = false;
+
+        // 外部插件注册的动态信号优先解析，命中则不进入内置枚举分支
+        if (BlackBoxSignalRegistry.TryGet(cond.Signal, out var dynEntry))
+        {
+            return CheckDynamicSignal(dynEntry, cond, out desc, out unavailable);
+        }
+
         var signal = cond.SignalEnum;
         var op = cond.OperatorEnum;
         string label = signal.ToString();
@@ -1052,6 +1114,77 @@ public partial class BlackBoxEngine
         desc = label + " 当前 " + value.ToString("F2") + "，阈值 " + target.ToString("F2") + " " + op + "，" + (hit ? "满足" : "不满足");
         return hit;
     }
+
+    /// <summary> 评估一条外部插件注册的动态信号 /<summary>
+    private bool CheckDynamicSignal(BlackBoxSignalRegistry.Entry entry, TriggerCondition cond,
+        out string desc, out bool unavailable)
+    {
+        unavailable = false;
+        var op = cond.OperatorEnum;
+
+        if (entry.Kind == BlackBoxSignalRegistry.SignalKind.Text)
+        {
+            string text = null;
+            try { if (entry.TextGetter != null) text = entry.TextGetter(); }
+            catch { text = null; }
+
+            if (text == null)
+            {
+                unavailable = true;
+                desc = entry.Name + " 当前不可用";
+                return false;
+            }
+
+            string expect = cond.TextValue ?? string.Empty;
+            bool ok;
+            switch (op)
+            {
+                case TriggerOperator.Contains:
+                    ok = text.Contains(expect, StringComparison.OrdinalIgnoreCase);
+                    break;
+                case TriggerOperator.NotEqual:
+                    ok = !text.Equals(expect, StringComparison.OrdinalIgnoreCase);
+                    break;
+                default:
+                    ok = text.Equals(expect, StringComparison.OrdinalIgnoreCase);
+                    break;
+            }
+
+            desc = entry.Name + " 当前为 " + Truncate(text, 30) + "，判定 " + (ok ? "满足" : "不满足");
+            return ok;
+        }
+
+        double value = double.NaN;
+        try { if (entry.NumberGetter != null) value = entry.NumberGetter(); }
+        catch { value = double.NaN; }
+
+        if (double.IsNaN(value))
+        {
+            unavailable = true;
+            desc = entry.Name + " 当前不可用";
+            return false;
+        }
+
+        double target = cond.Value;
+        bool hit;
+        switch (op)
+        {
+            case TriggerOperator.Greater: hit = value > target + 1e-9; break;
+            case TriggerOperator.Less: hit = value < target - 1e-9; break;
+            case TriggerOperator.GreaterOrEqual: hit = value >= target - 1e-9; break;
+            case TriggerOperator.LessOrEqual: hit = value <= target + 1e-9; break;
+            case TriggerOperator.Equal: hit = Math.Abs(value - target) <= 1e-6; break;
+            case TriggerOperator.NotEqual: hit = Math.Abs(value - target) > 1e-6; break;
+            case TriggerOperator.Contains:
+                hit = value.ToString("F2").Contains(target.ToString("F2"), StringComparison.OrdinalIgnoreCase);
+                break;
+            default: hit = false; break;
+        }
+
+        desc = entry.Name + " 当前 " + value.ToString("F2") + "，阈值 " + target.ToString("F2") + " " + op + "，" + (hit ? "满足" : "不满足");
+        return hit;
+    }
+
 
     /// <summary>判断信号是否为文本型。</summary>
     public static bool IsTextSignal(TriggerSignal signal) => signal switch

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -89,10 +89,20 @@ public partial class BlackBoxSuiteModule
         string signalText = part.Substring(0, opIndex).Trim();
         string valueText = part.Substring(opIndex + opText.Length).Trim();
 
-        if (!Enum.TryParse<TriggerSignal>(signalText, true, out var signal))
+        BlackBoxSignalRegistry.Entry dynDef = null;
+        TriggerSignal signal = default;
+        bool isDynamic = false;
+        if (!Enum.TryParse<TriggerSignal>(signalText, true, out signal))
         {
-            error = "未知信号：" + signalText;
-            return false;
+            if (BlackBoxSignalRegistry.TryGet(signalText, out dynDef))
+            {
+                isDynamic = true;
+            }
+            else
+            {
+                error = "未知信号：" + signalText + "。可先调用信号清单查看全部可用信号。";
+                return false;
+            }
         }
 
         TriggerOperator op2 = opText.ToLowerInvariant() switch
@@ -116,13 +126,16 @@ public partial class BlackBoxSuiteModule
 
         var cond = new TriggerCondition
         {
-            Signal = signal.ToString(),
+            Signal = isDynamic ? dynDef.Name : signal.ToString(),
             Operator = op2.ToString(),
             DurationSeconds = durationSeconds,
             GraceSeconds = durationSeconds > 0 ? graceSeconds : 0
         };
 
-        if (TriggerTextSignals.Contains(signal.ToString()))
+        bool treatAsText = isDynamic
+            ? dynDef.Kind == BlackBoxSignalRegistry.SignalKind.Text
+            : TriggerTextSignals.Contains(signal.ToString());
+        if (treatAsText)
         {
             cond.Value = 0;
             cond.TextValue = valueText;
@@ -364,6 +377,12 @@ public partial class BlackBoxSuiteModule
         sb.Append("ClipboardLength 剪贴板文本长度\n");
         sb.Append("MinuteOfDay 当天第几分钟，0 到 1439\n");
         sb.Append("DayOfWeek 星期几，1 到 7\n");
+        sb.Append("CamPresent 摄像头是否检测到人，1 是 0 否（受离开宽限约束）\n");
+        sb.Append("CamFaceCount 摄像头画面内人脸数量\n");
+        sb.Append("CamYaw 头部左右偏转比例，负值偏左正值偏右，绝对值越大偏得越多\n");
+        sb.Append("CamPitch 头部俯仰比例，正值低头负值抬头\n");
+        sb.Append("CamAbsentSeconds 距上次在画面中见到人的秒数\n");
+        sb.Append("CamAvailable 摄像头是否可用，1 可用 0 未启用或打不开\n");
         sb.Append("文本型（写法：信号名 == 文本 或 信号名 != 文本，另支持 信号名包含文本 与 contains 子串匹配）：\n");
         sb.Append("ForegroundApp 前台进程名，如 chrome\n");
         sb.Append("ForegroundTitle 前台窗口标题\n");
@@ -386,7 +405,22 @@ public partial class BlackBoxSuiteModule
         sb.Append("AudioEndpointChanged 音频输出端点切换\n");
         sb.Append("事件型示例：AppOpened==1 表示这一秒有应用切到前台，一次切换只触发一次。\n");
         sb.Append("示例：IdleSeconds>=300;IsFullscreen==0 表示空闲满五分钟且不在全屏。\n");
-        sb.Append("提示：纯到点闹钟请用 SystemEventBoost 的定时任务，本功能的价值在于叠加体征条件。");
+        sb.Append("提示：纯到点闹钟请用 SystemEventBoost 的定时任务，本功能的价值在于叠加体征条件。\n");
+
+        var extSignals = BlackBoxSignalRegistry.All();
+        if (extSignals.Count > 0)
+        {
+            sb.Append("外部插件注册的信号（由扩展插件提供，插件未运行时可能不可用）：\n");
+            foreach (var ex in extSignals)
+            {
+                string kindText = ex.Kind == BlackBoxSignalRegistry.SignalKind.Text ? "文本型" : "数值型";
+                sb.Append(ex.Name).Append(" ").Append(kindText);
+                if (!string.IsNullOrEmpty(ex.Description)) sb.Append("，").Append(ex.Description);
+                if (!string.IsNullOrEmpty(ex.Owner)) sb.Append("（来源 ").Append(ex.Owner).Append("）");
+                sb.Append("\n");
+            }
+        }
+
         interactor.Poke(sb.ToString());
         return Task.CompletedTask;
     }
